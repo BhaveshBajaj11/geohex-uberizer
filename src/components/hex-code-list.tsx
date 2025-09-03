@@ -23,6 +23,7 @@ type HexCodeListProps = {
   resolution: number;
   onSelectionChange: (index: string, selected: boolean) => void;
   onSelectAll: (selectAll: boolean) => void;
+  onHexHover: (index: string | null) => void;
 };
 
 export default function HexCodeList({
@@ -31,6 +32,7 @@ export default function HexCodeList({
   resolution,
   onSelectionChange,
   onSelectAll,
+  onHexHover,
 }: HexCodeListProps) {
   const {toast} = useToast();
 
@@ -43,7 +45,6 @@ export default function HexCodeList({
   };
 
   const allSelected = allH3Indexes.length > 0 && selectedH3Indexes.size === allH3Indexes.length;
-  const isIndeterminate = selectedH3Indexes.size > 0 && !allSelected;
 
   return (
     <Card className="mx-2 mt-4">
@@ -66,10 +67,14 @@ export default function HexCodeList({
           </Label>
         </div>
         <Separator className="mb-2" />
-        <ScrollArea className="h-48 w-full rounded-md border">
+        <ScrollArea className="h-48 w-full rounded-md border" onMouseLeave={() => onHexHover(null)}>
           <div className="p-2 font-code text-xs">
             {allH3Indexes.map((hex) => (
-              <div key={hex} className="flex items-center space-x-2 hover:bg-muted/50 rounded-sm p-1">
+              <div
+                key={hex}
+                className="flex items-center space-x-2 hover:bg-muted/50 rounded-sm p-1"
+                onMouseEnter={() => onHexHover(hex)}
+              >
                 <Checkbox
                   id={hex}
                   checked={selectedH3Indexes.has(hex)}

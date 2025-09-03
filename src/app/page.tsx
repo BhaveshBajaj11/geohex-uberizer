@@ -3,7 +3,8 @@
 
 import {useState, useEffect} from 'react';
 import type {LatLngLiteral} from 'leaflet';
-import {cellToBoundary, polygonToCells, cellArea} from 'h3-js';
+import {cellToBoundary, polygonToCells} from 'h3-js';
+import {cellArea} from 'h3-js';
 import {Layers} from 'lucide-react';
 import dynamic from 'next/dynamic';
 import PolygonForm from '@/components/polygon-form';
@@ -28,7 +29,10 @@ const MapComponent = dynamic(() => import('@/components/map-component'), {
 });
 
 type Polygon = LatLngLiteral[];
-type Hexagon = LatLngLiteral[];
+type Hexagon = {
+  index: string;
+  boundary: LatLngLiteral[];
+};
 
 export default function Home() {
   const [polygon, setPolygon] = useState<Polygon | null>(null);
@@ -40,14 +44,18 @@ export default function Home() {
   const [polygonArea, setPolygonArea] = useState<number | null>(null);
   const [hexagonArea, setHexagonArea] = useState<number | null>(null);
   const [resolution, setResolution] = useState<number>(10);
+  const [hoveredHexIndex, setHoveredHexIndex] = useState<string | null>(null);
 
   useEffect(() => {
     // Update map hexagons when selection changes
-    const newHexagons: Hexagon[] = Array.from(selectedH3Indexes).map((index) => {
+    const selectedHexagons: Hexagon[] = Array.from(selectedH3Indexes).map((index) => {
       const boundary = cellToBoundary(index, false); // Returns [lat, lng]
-      return boundary.map(([lat, lng]) => ({lat, lng}));
+      return {
+        index,
+        boundary: boundary.map(([lat, lng]) => ({lat, lng})),
+      };
     });
-    setHexagons(newHexagons);
+    setHexagons(selectedHexagons);
 
     // Update hexagon area when selection changes
     const totalHexagonArea = Array.from(selectedH3Indexes).reduce(
@@ -74,36 +82,36 @@ export default function Home() {
             if (isNaN(lng) || isNaN(lat)) {
               throw new Error(`Invalid coordinate pair found: "${pair.trim()}"`);
             }
-            return {lng, lat};
+            return [lng, lat]; // Keep as [lng, lat] for turf
           })
         );
 
-      const outerRing = rings[0];
-      if (outerRing.length < 4) {
+      if (rings[0].length < 4) {
         throw new Error('A polygon must have at least 4 coordinate pairs to close the loop.');
       }
 
-      const first = outerRing[0];
-      const last = outerRing[outerRing.length - 1];
-      if (first.lat !== last.lat || first.lng !== last.lng) {
-        outerRing.push(first);
+      const first = rings[0][0];
+      const last = rings[0][rings[0].length - 1];
+      if (first[0] !== last[0] || first[1] !== last[1]) {
+        rings[0].push(first);
       }
 
-      const newPolygon: Polygon = outerRing.map(({lat, lng}) => ({lat, lng}));
+      const newPolygon: Polygon = rings[0].map(([lng, lat]) => ({lat, lng}));
       setPolygon(newPolygon);
 
-      const h3Polygon = rings.map((ring) => ring.map(({lat, lng}) => [lat, lng]));
+      // h3-js expects [lat, lng] for polygonToCells
+      const h3Polygon = rings.map((ring) => ring.map(([lng, lat]) => [lat, lng]));
       const h3Resolution = data.resolution;
       setResolution(h3Resolution);
 
-      const h3Indexes = polygonToCells(h3Polygon, h3Resolution, true);
+      const h3Indexes = polygonToCells(h3Polygon[0], h3Resolution, true);
 
       setAllH3Indexes(h3Indexes);
       const newSelectedH3Indexes = new Set(h3Indexes);
       setSelectedH3Indexes(newSelectedH3Indexes);
 
-      const turfCoords = rings.map((ring) => ring.map(({lng, lat}) => [lng, lat]));
-      const poly = turfPolygon(turfCoords);
+      // turf expects [lng, lat]
+      const poly = turfPolygon(rings);
       const calculatedArea = area(poly);
       setPolygonArea(calculatedArea);
 
@@ -150,6 +158,10 @@ export default function Home() {
     }
   };
 
+  const handleHexHover = (index: string | null) => {
+    setHoveredHexIndex(index);
+  };
+
   return (
     <SidebarProvider>
       <Sidebar>
@@ -189,6 +201,7 @@ export default function Home() {
               resolution={resolution}
               onSelectionChange={handleHexagonSelectionChange}
               onSelectAll={handleSelectAll}
+              onHexHover={handleHexHover}
             />
           )}
         </SidebarContent>
@@ -198,7 +211,7 @@ export default function Home() {
           <div className="absolute left-4 top-4 z-10">
             <SidebarTrigger />
           </div>
-          <MapComponent key={mapKey} polygon={polygon} hexagons={hexagons} />
+          <MapComponent key={mapKey} polygon={polygon} hexagons={hexagons} hoveredHexIndex={hoveredHexIndex} />
         </main>
       </SidebarInset>
     </SidebarProvider>

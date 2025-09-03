@@ -5,12 +5,18 @@ import {useEffect, useRef} from 'react';
 import type {LatLngExpression, LatLngLiteral} from 'leaflet';
 import L from 'leaflet';
 
-type MapComponentProps = {
-  polygon: LatLngLiteral[] | null;
-  hexagons: LatLngLiteral[][];
+type Hexagon = {
+  index: string;
+  boundary: LatLngLiteral[];
 };
 
-export default function MapComponent({polygon, hexagons}: MapComponentProps) {
+type MapComponentProps = {
+  polygon: LatLngLiteral[] | null;
+  hexagons: Hexagon[];
+  hoveredHexIndex: string | null;
+};
+
+export default function MapComponent({polygon, hexagons, hoveredHexIndex}: MapComponentProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<L.Map | null>(null);
   const featureGroup = useRef<L.FeatureGroup | null>(null);
@@ -37,6 +43,7 @@ export default function MapComponent({polygon, hexagons}: MapComponentProps) {
 
     const primaryColor = 'hsl(var(--primary))';
     const accentColor = 'hsl(var(--accent))';
+    const highlightColor = 'hsl(var(--accent))';
 
     if (polygon && polygon.length > 0) {
       L.polygon(polygon as LatLngExpression[], {
@@ -49,12 +56,13 @@ export default function MapComponent({polygon, hexagons}: MapComponentProps) {
     }
 
     hexagons.forEach((hex) => {
-      L.polygon(hex as LatLngExpression[], {
+      const isHovered = hex.index === hoveredHexIndex;
+      L.polygon(hex.boundary as LatLngExpression[], {
         color: 'red',
         weight: 3,
         opacity: 0.8,
-        fillColor: 'red',
-        fillOpacity: 0.2,
+        fillColor: isHovered ? highlightColor : 'red',
+        fillOpacity: isHovered ? 0.6 : 0.2,
       }).addTo(group);
     });
 
@@ -64,7 +72,7 @@ export default function MapComponent({polygon, hexagons}: MapComponentProps) {
         map.fitBounds(bounds, {padding: [50, 50]});
       }
     }
-  }, [polygon, hexagons]);
+  }, [polygon, hexagons, hoveredHexIndex]);
 
   return <div ref={mapRef} className="h-full w-full" />;
 }
