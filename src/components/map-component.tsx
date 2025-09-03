@@ -1,3 +1,4 @@
+
 'use client';
 
 import {useEffect, useRef} from 'react';
@@ -15,10 +16,8 @@ export default function MapComponent({polygon, hexagons}: MapComponentProps) {
   const featureGroup = useRef<L.FeatureGroup | null>(null);
 
   useEffect(() => {
-    // Prevent initialization if the ref is not set
     if (!mapRef.current) return;
 
-    // Initialize map only once
     if (!mapInstance.current) {
       mapInstance.current = L.map(mapRef.current).setView([40.7128, -74.006], 10);
 
@@ -34,15 +33,13 @@ export default function MapComponent({polygon, hexagons}: MapComponentProps) {
 
     if (!group) return;
 
-    // Clear existing layers from the group
     group.clearLayers();
 
     const primaryColor = 'hsl(var(--primary))';
     const accentColor = 'hsl(var(--accent))';
 
-    // Add new polygon if it exists
     if (polygon && polygon.length > 0) {
-      const leafletPolygon = L.polygon(polygon as LatLngExpression[], {
+      L.polygon(polygon as LatLngExpression[], {
         color: primaryColor,
         weight: 2,
         opacity: 0.9,
@@ -51,7 +48,6 @@ export default function MapComponent({polygon, hexagons}: MapComponentProps) {
       }).addTo(group);
     }
 
-    // Add new hexagons
     hexagons.forEach((hex) => {
       L.polygon(hex as LatLngExpression[], {
         color: accentColor,
@@ -62,19 +58,13 @@ export default function MapComponent({polygon, hexagons}: MapComponentProps) {
       }).addTo(group);
     });
 
-    // Fit bounds if there are any layers
     if (group.getLayers().length > 0) {
-      map.fitBounds(group.getBounds(), {padding: [50, 50]});
-    }
-
-    // Cleanup function to remove the map instance on component unmount
-    return () => {
-      if (mapInstance.current) {
-        mapInstance.current.remove();
-        mapInstance.current = null;
+      const bounds = group.getBounds();
+      if (bounds.isValid()) {
+        map.fitBounds(bounds, {padding: [50, 50]});
       }
-    };
-  }, [polygon, hexagons]); // Rerun effect when polygon or hexagons change
+    }
+  }, [polygon, hexagons]);
 
   return <div ref={mapRef} className="h-full w-full" />;
 }
