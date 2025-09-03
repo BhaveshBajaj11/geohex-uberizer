@@ -67,7 +67,7 @@ export default function MapComponent({polygon, hexagons}: MapComponentProps) {
       map.fitBounds(group.getBounds(), {padding: [50, 50]});
     }
 
-    // Cleanup function to remove the map instance
+    // Cleanup function to remove the map instance on component unmount
     return () => {
       if (mapInstance.current) {
         mapInstance.current.remove();

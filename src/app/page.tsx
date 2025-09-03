@@ -1,4 +1,3 @@
-
 'use client';
 
 import {useState} from 'react';
@@ -17,6 +16,9 @@ import {
 } from '@/components/ui/sidebar';
 import {useToast} from '@/hooks/use-toast';
 import {Skeleton} from '@/components/ui/skeleton';
+import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
+import area from '@turf/area';
+import {polygon as turfPolygon} from '@turf/helpers';
 
 const MapComponent = dynamic(() => import('@/components/map-component'), {
   ssr: false,
@@ -31,6 +33,7 @@ export default function Home() {
   const [hexagons, setHexagons] = useState<Hexagon[]>([]);
   const {toast} = useToast();
   const [mapKey, setMapKey] = useState(Date.now());
+  const [polygonArea, setPolygonArea] = useState<number | null>(null);
 
   const handlePolygonSubmit = (data: {wkt: string}) => {
     try {
@@ -69,6 +72,12 @@ export default function Home() {
         return boundary.map(([lat, lng]) => ({lat, lng}));
       });
 
+      // Calculate area
+      const turfCoords = coordinates.map(({lng, lat}) => [lng, lat]);
+      const poly = turfPolygon([turfCoords]);
+      const calculatedArea = area(poly);
+      setPolygonArea(calculatedArea);
+
       setHexagons(newHexagons);
       setMapKey(Date.now());
 
@@ -86,6 +95,7 @@ export default function Home() {
       });
       setPolygon(null);
       setHexagons([]);
+      setPolygonArea(null);
       setMapKey(Date.now());
     }
   };
@@ -101,6 +111,21 @@ export default function Home() {
         </SidebarHeader>
         <SidebarContent>
           <PolygonForm onSubmit={handlePolygonSubmit} />
+          {polygonArea !== null && (
+            <Card className="mx-2 mt-4">
+              <CardHeader>
+                <CardTitle>Polygon Area</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p>
+                  {(polygonArea / 1_000_000).toFixed(2)} km²
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {polygonArea.toFixed(2)} m²
+                </p>
+              </CardContent>
+            </Card>
+          )}
         </SidebarContent>
       </Sidebar>
       <SidebarInset>

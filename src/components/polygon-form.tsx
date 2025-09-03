@@ -32,7 +32,7 @@ type PolygonFormProps = {
   onSubmit: (values: z.infer<typeof formSchema>) => void;
 };
 
-const defaultWkt = 'POLYGON ((-74.047285 40.683921, -74.047285 40.735129, -73.97115 40.735129, -73.97115 40.683921, -74.047285 40.683921))';
+const defaultWkt = 'POLYGON ((78.8232031 11.0973196, 78.823187 11.0964142, 78.8234606 11.0963879, 78.823407 11.0972091, 78.8232031 11.0973196))';
 
 
 export default function PolygonForm({onSubmit}: PolygonFormProps) {
