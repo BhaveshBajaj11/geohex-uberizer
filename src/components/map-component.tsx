@@ -1,93 +1,67 @@
 'use client';
 
-import {useEffect, useState} from 'react';
-import {Map, useMap} from '@vis.gl/react-google-maps';
-import type {LatLngLiteral} from 'google.maps';
+import {useEffect} from 'react';
+import type {LatLngExpression} from 'leaflet';
+import {MapContainer, TileLayer, Polygon, useMap} from 'react-leaflet';
+import L from 'leaflet';
 
 type MapComponentProps = {
-  polygon: LatLngLiteral[] | null;
-  hexagons: LatLngLiteral[][];
+  polygon: LatLngExpression[] | null;
+  hexagons: LatLngExpression[][];
 };
 
-const MapController = ({
-  polygon,
-  hexagons,
-}: {
-  polygon: LatLngLiteral[] | null;
-  hexagons: LatLngLiteral[][];
-}) => {
+const MapController = ({polygon}: {polygon: LatLngExpression[] | null}) => {
   const map = useMap();
-  const [drawnPolygons, setDrawnPolygons] = useState<google.maps.Polygon[]>([]);
 
   useEffect(() => {
-    if (!map) return;
-
-    // Clear existing polygons
-    drawnPolygons.forEach((p) => p.setMap(null));
-    const newDrawnPolygons: google.maps.Polygon[] = [];
-
-    // Draw main polygon
-    if (polygon && polygon.length > 0) {
-      const poly = new window.google.maps.Polygon({
-        paths: polygon,
-        strokeColor: 'hsl(var(--primary))',
-        strokeOpacity: 0.9,
-        strokeWeight: 2,
-        fillColor: 'hsl(var(--primary))',
-        fillOpacity: 0.2,
-      });
-      poly.setMap(map);
-      newDrawnPolygons.push(poly);
+    if (map && polygon && polygon.length > 0) {
+      const bounds = L.latLngBounds(polygon);
+      map.fitBounds(bounds, {padding: [50, 50]});
     }
-
-    // Draw hexagons
-    hexagons.forEach((hex) => {
-      const hexPoly = new window.google.maps.Polygon({
-        paths: hex,
-        strokeColor: 'hsl(var(--accent))',
-        strokeOpacity: 0.8,
-        strokeWeight: 1,
-        fillColor: 'hsl(var(--accent))',
-        fillOpacity: 0.4,
-      });
-      hexPoly.setMap(map);
-      newDrawnPolygons.push(hexPoly);
-    });
-
-    setDrawnPolygons(newDrawnPolygons);
-
-    // Fit map to bounds of the main polygon
-    if (polygon && polygon.length > 0) {
-      const bounds = new window.google.maps.LatLngBounds();
-      polygon.forEach((p) => bounds.extend(p));
-      map.fitBounds(bounds, 100); // 100px padding
-    }
-
-    // Cleanup on unmount
-    return () => {
-      newDrawnPolygons.forEach((p) => p.setMap(null));
-    };
-  }, [map, polygon, hexagons]);
+  }, [map, polygon]);
 
   return null;
 };
 
 export default function MapComponent({polygon, hexagons}: MapComponentProps) {
-  const mapId = 'a1b2c3d4e5f6'; // Custom map ID for styling
-  const initialCenter = {lat: 40.7128, lng: -74.006}; // Default to NYC
+  const initialCenter: LatLngExpression = [40.7128, -74.006]; // NYC
   const initialZoom = 10;
 
+  const primaryColor = 'hsl(var(--primary))';
+  const accentColor = 'hsl(var(--accent))';
+
   return (
-    <div className="h-full w-full">
-      <Map
-        defaultCenter={initialCenter}
-        defaultZoom={initialZoom}
-        mapId={mapId}
-        disableDefaultUI={true}
-        gestureHandling={'greedy'}
-        className="h-full w-full">
-        <MapController polygon={polygon} hexagons={hexagons} />
-      </Map>
-    </div>
+    <MapContainer center={initialCenter} zoom={initialZoom} scrollWheelZoom={true} className="h-full w-full">
+      <TileLayer
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      />
+      {polygon && (
+        <Polygon
+          positions={polygon}
+          pathOptions={{
+            color: primaryColor,
+            weight: 2,
+            opacity: 0.9,
+            fillColor: primaryColor,
+            fillOpacity: 0.2,
+          }}
+        />
+      )}
+      {hexagons.map((hex, index) => (
+        <Polygon
+          key={index}
+          positions={hex}
+          pathOptions={{
+            color: accentColor,
+            weight: 1,
+            opacity: 0.8,
+            fillColor: accentColor,
+            fillOpacity: 0.4,
+          }}
+        />
+      ))}
+      <MapController polygon={polygon} />
+    </MapContainer>
   );
 }
