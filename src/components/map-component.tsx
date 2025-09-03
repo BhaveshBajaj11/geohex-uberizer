@@ -1,7 +1,7 @@
 'use client';
 
-import {useEffect} from 'react';
-import {Map, Polygon, useMap} from '@vis.gl/react-google-maps';
+import {useEffect, useState} from 'react';
+import {AdvancedMarker, Map, useMap} from '@vis.gl/react-google-maps';
 import type {LatLngLiteral} from 'google.maps';
 
 type MapComponentProps = {
@@ -9,16 +9,65 @@ type MapComponentProps = {
   hexagons: LatLngLiteral[][];
 };
 
-const MapController = ({polygon}: {polygon: LatLngLiteral[] | null}) => {
+const MapController = ({
+  polygon,
+  hexagons,
+}: {
+  polygon: LatLngLiteral[] | null;
+  hexagons: LatLngLiteral[][];
+}) => {
   const map = useMap();
+  const [drawnPolygons, setDrawnPolygons] = useState<google.maps.Polygon[]>([]);
 
   useEffect(() => {
-    if (!map || !polygon || polygon.length === 0) return;
+    if (!map) return;
 
-    const bounds = new window.google.maps.LatLngBounds();
-    polygon.forEach((p) => bounds.extend(p));
-    map.fitBounds(bounds, 100); // 100px padding
-  }, [map, polygon]);
+    // Clear existing polygons
+    drawnPolygons.forEach((p) => p.setMap(null));
+    const newDrawnPolygons: google.maps.Polygon[] = [];
+
+    // Draw main polygon
+    if (polygon && polygon.length > 0) {
+      const poly = new window.google.maps.Polygon({
+        paths: polygon,
+        strokeColor: 'hsl(var(--primary))',
+        strokeOpacity: 0.9,
+        strokeWeight: 2,
+        fillColor: 'hsl(var(--primary))',
+        fillOpacity: 0.2,
+      });
+      poly.setMap(map);
+      newDrawnPolygons.push(poly);
+    }
+
+    // Draw hexagons
+    hexagons.forEach((hex) => {
+      const hexPoly = new window.google.maps.Polygon({
+        paths: hex,
+        strokeColor: 'hsl(var(--accent))',
+        strokeOpacity: 0.8,
+        strokeWeight: 1,
+        fillColor: 'hsl(var(--accent))',
+        fillOpacity: 0.4,
+      });
+      hexPoly.setMap(map);
+      newDrawnPolygons.push(hexPoly);
+    });
+
+    setDrawnPolygons(newDrawnPolygons);
+
+    // Fit map to bounds of the main polygon
+    if (polygon && polygon.length > 0) {
+      const bounds = new window.google.maps.LatLngBounds();
+      polygon.forEach((p) => bounds.extend(p));
+      map.fitBounds(bounds, 100); // 100px padding
+    }
+
+    // Cleanup on unmount
+    return () => {
+      newDrawnPolygons.forEach((p) => p.setMap(null));
+    };
+  }, [map, polygon, hexagons]);
 
   return null;
 };
@@ -37,28 +86,7 @@ export default function MapComponent({polygon, hexagons}: MapComponentProps) {
         disableDefaultUI={true}
         gestureHandling={'greedy'}
         className="h-full w-full">
-        {polygon && (
-          <Polygon
-            paths={polygon}
-            strokeColor="hsl(var(--primary))"
-            strokeOpacity={0.9}
-            strokeWeight={2}
-            fillColor="hsl(var(--primary))"
-            fillOpacity={0.2}
-          />
-        )}
-        {hexagons.map((hex, index) => (
-          <Polygon
-            key={index}
-            paths={hex}
-            strokeColor="hsl(var(--accent))"
-            strokeOpacity={0.8}
-            strokeWeight={1}
-            fillColor="hsl(var(--accent))"
-            fillOpacity={0.4}
-          />
-        ))}
-        <MapController polygon={polygon} />
+        <MapController polygon={polygon} hexagons={hexagons} />
       </Map>
     </div>
   );
