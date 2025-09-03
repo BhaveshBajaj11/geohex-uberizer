@@ -37,8 +37,9 @@ export default function Home() {
   const {toast} = useToast();
   const [mapKey, setMapKey] = useState(Date.now());
   const [polygonArea, setPolygonArea] = useState<number | null>(null);
+  const [resolution, setResolution] = useState<number>(10);
 
-  const handlePolygonSubmit = (data: {wkt: string}) => {
+  const handlePolygonSubmit = (data: {wkt: string; resolution: number}) => {
     try {
       const wkt = data.wkt.trim();
       if (!wkt.toUpperCase().startsWith('POLYGON')) {
@@ -46,7 +47,6 @@ export default function Home() {
       }
 
       const coordString = wkt.substring(wkt.indexOf('(') + 1, wkt.lastIndexOf(')'));
-      // Handle POLYGON ((...))
       const rings = coordString.substring(coordString.indexOf('(') + 1, coordString.lastIndexOf(')'));
 
       const pairs = rings.split(',');
@@ -62,7 +62,6 @@ export default function Home() {
         return {lng, lat};
       });
 
-      // Ensure the polygon is closed
       const first = coordinates[0];
       const last = coordinates[coordinates.length - 1];
       if (first.lat !== last.lat || first.lng !== last.lng) {
@@ -72,18 +71,17 @@ export default function Home() {
       const newPolygon: Polygon = coordinates.map(({lat, lng}) => ({lat, lng}));
       setPolygon(newPolygon);
 
-      // h3-js expects GeoJSON-style polygons: an array of rings, where each ring is an array of [lat, lng] pairs
       const h3Polygon = [coordinates.map(({lat, lng}) => [lat, lng])];
-      const h3Resolution = 10;
+      const h3Resolution = data.resolution;
+      setResolution(h3Resolution);
       const h3Indexes = polygonToCells(h3Polygon, h3Resolution);
       setH3Indexes(h3Indexes);
 
       const newHexagons: Hexagon[] = h3Indexes.map((index) => {
-        const boundary = cellToBoundary(index, true); // Get boundary as [lat, lng]
+        const boundary = cellToBoundary(index, true);
         return boundary.map(([lat, lng]) => ({lng, lat}));
       });
 
-      // Calculate area with Turf.js which expects GeoJSON standard [lng, lat]
       const turfCoords = coordinates.map(({lng, lat}) => [lng, lat]);
       const poly = turfPolygon([turfCoords]);
       const calculatedArea = area(poly);
@@ -138,7 +136,7 @@ export default function Home() {
               </CardContent>
             </Card>
           )}
-          {h3Indexes.length > 0 && <HexCodeList h3Indexes={h3Indexes} />}
+          {h3Indexes.length > 0 && <HexCodeList h3Indexes={h3Indexes} resolution={resolution} />}
         </SidebarContent>
       </Sidebar>
       <SidebarInset>

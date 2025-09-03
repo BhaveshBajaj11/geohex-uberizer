@@ -1,3 +1,4 @@
+
 'use client';
 
 import {Copy} from 'lucide-react';
@@ -15,9 +16,10 @@ import {useToast} from '@/hooks/use-toast';
 
 type HexCodeListProps = {
   h3Indexes: string[];
+  resolution: number;
 };
 
-export default function HexCodeList({h3Indexes}: HexCodeListProps) {
+export default function HexCodeList({h3Indexes, resolution}: HexCodeListProps) {
   const {toast} = useToast();
 
   const handleCopy = () => {
@@ -31,7 +33,7 @@ export default function HexCodeList({h3Indexes}: HexCodeListProps) {
   return (
     <Card className="mx-2 mt-4">
       <CardHeader>
-        <CardTitle>H3 Indexes (Res 10)</CardTitle>
+        <CardTitle>H3 Indexes (Res {resolution})</CardTitle>
         <CardDescription>
           {h3Indexes.length} hexagons generated.
         </CardDescription>

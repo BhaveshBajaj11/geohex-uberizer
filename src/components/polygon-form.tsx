@@ -17,6 +17,13 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import {Textarea} from '@/components/ui/textarea';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 const formSchema = z.object({
   wkt: z
@@ -26,20 +33,22 @@ const formSchema = z.object({
       (val) => val.trim().toUpperCase().startsWith('POLYGON'),
       {message: 'Input must be a valid WKT POLYGON string.'}
     ),
+  resolution: z.coerce.number().min(0).max(15),
 });
 
 type PolygonFormProps = {
   onSubmit: (values: z.infer<typeof formSchema>) => void;
 };
 
-const defaultWkt = 'POLYGON ((78.8232031 11.0973196, 78.823187 11.0964142, 78.8234606 11.0963879, 78.823407 11.0972091, 78.8232031 11.0973196))';
-
+const defaultWkt =
+  'POLYGON ((78.8232031 11.0973196, 78.823187 11.0964142, 78.8234606 11.0963879, 78.823407 11.0972091, 78.8232031 11.0973196))';
 
 export default function PolygonForm({onSubmit}: PolygonFormProps) {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       wkt: defaultWkt,
+      resolution: 10,
     },
   });
 
@@ -66,13 +75,36 @@ export default function PolygonForm({onSubmit}: PolygonFormProps) {
               <FormControl>
                 <Textarea
                   placeholder="Paste your WKT here..."
-                  className="min-h-[200px] h-96 font-code text-xs"
+                  className="min-h-[200px] h-72 font-code text-xs"
                   {...field}
                 />
               </FormControl>
-              <FormDescription>
-                Input a valid Well-Known Text (WKT) Polygon.
-              </FormDescription>
+              <FormDescription>Input a valid Well-Known Text (WKT) Polygon.</FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="resolution"
+          render={({field}) => (
+            <FormItem>
+              <FormLabel>H3 Resolution</FormLabel>
+              <Select onValueChange={field.onChange} defaultValue={String(field.value)}>
+                <FormControl>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a resolution" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  {Array.from({length: 16}, (_, i) => (
+                    <SelectItem key={i} value={String(i)}>
+                      {i}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FormDescription>Select the H3 resolution (0 is largest, 15 is smallest).</FormDescription>
               <FormMessage />
             </FormItem>
           )}
