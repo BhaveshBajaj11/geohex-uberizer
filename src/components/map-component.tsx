@@ -50,11 +50,11 @@ export default function MapComponent({polygon, hexagons}: MapComponentProps) {
 
     hexagons.forEach((hex) => {
       L.polygon(hex as LatLngExpression[], {
-        color: accentColor,
-        weight: 1,
+        color: 'red',
+        weight: 3,
         opacity: 0.8,
-        fillColor: accentColor,
-        fillOpacity: 0.4,
+        fillColor: 'red',
+        fillOpacity: 0.2,
       }).addTo(group);
     });
 
