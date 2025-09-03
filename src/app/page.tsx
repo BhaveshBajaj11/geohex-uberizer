@@ -72,8 +72,8 @@ export default function Home() {
       const newPolygon: Polygon = coordinates.map(({lat, lng}) => ({lat, lng}));
       setPolygon(newPolygon);
 
-      // h3-js expects GeoJSON-style polygons: an array of rings, where each ring is an array of [lng, lat] pairs
-      const h3Polygon = [coordinates.map(({lng, lat}) => [lng, lat])];
+      // h3-js expects GeoJSON-style polygons: an array of rings, where each ring is an array of [lat, lng] pairs
+      const h3Polygon = [coordinates.map(({lat, lng}) => [lat, lng])];
       const h3Resolution = 10;
       const h3Indexes = polygonToCells(h3Polygon, h3Resolution);
       setH3Indexes(h3Indexes);
