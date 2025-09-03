@@ -31,6 +31,7 @@ export type LeafletPolygon = LatLngLiteral[];
 
 export type PolygonData = {
   id: number;
+  name: string;
   leafletPolygon: LeafletPolygon;
   area: number;
   resolution: number;
@@ -53,7 +54,7 @@ export default function Home() {
   useEffect(() => {
     // Update map hexagons when selection changes
     const selectedHexagons: Hexagon[] = Array.from(selectedH3Indexes).map((index) => {
-      const boundary = cellToBoundary(index, false); // Returns [lat, lng]
+      const boundary = cellToBoundary(index, true); // Returns [lat, lng]
       return {
         index,
         boundary: boundary.map(([lat, lng]) => ({lat, lng})),
@@ -79,7 +80,7 @@ export default function Home() {
             if (isNaN(lng) || isNaN(lat)) {
               throw new Error(`Invalid coordinate pair found: "${pair.trim()}"`);
             }
-            return [lng, lat]; // Keep as [lng, lat]
+            return [lng, lat];
           })
         );
 
@@ -98,13 +99,14 @@ export default function Home() {
       const h3Polygon = rings.map((ring) => ring.map(([lng, lat]) => [lat, lng]));
       const h3Resolution = data.resolution;
 
-      const h3Indexes = polygonToCells(h3Polygon, h3Resolution);
+      const h3Indexes = polygonToCells(h3Polygon, h3Resolution, true);
 
       const turfPoly = turfPolygon(rings);
       const calculatedArea = area(turfPoly);
 
       const newPolygonData: PolygonData = {
         id: Date.now(),
+        name: `Polygon ${polygons.length + 1}`,
         leafletPolygon: newLeafletPolygon,
         area: calculatedArea,
         resolution: h3Resolution,
@@ -178,6 +180,12 @@ export default function Home() {
     }
   };
 
+  const handleRenamePolygon = (polygonId: number, newName: string) => {
+    setPolygons((prev) =>
+      prev.map((p) => (p.id === polygonId ? {...p, name: newName} : p))
+    );
+  };
+
   const totalHexagonArea = Array.from(selectedH3Indexes).reduce(
     (sum, index) => sum + cellArea(index, 'm2'),
     0
@@ -201,6 +209,7 @@ export default function Home() {
             onSelectAll={handleSelectAllInPolygon}
             onHexHover={handleHexHover}
             onRemovePolygon={handleRemovePolygon}
+            onRenamePolygon={handleRenamePolygon}
             totalHexagonArea={totalHexagonArea}
           />
         </SidebarContent>
