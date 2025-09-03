@@ -3,7 +3,7 @@
 
 import {useState} from 'react';
 import type {LatLngLiteral} from 'leaflet';
-import {cellToBoundary, polygonToCells} from 'h3-js';
+import {cellToBoundary, polyfill} from 'h3-js';
 import {Layers} from 'lucide-react';
 import dynamic from 'next/dynamic';
 import PolygonForm from '@/components/polygon-form';
@@ -75,12 +75,12 @@ export default function Home() {
       // h3-js expects GeoJSON-style polygons: an array of rings, where each ring is an array of [lat, lng] pairs
       const h3Polygon = [coordinates.map(({lat, lng}) => [lat, lng])];
       const h3Resolution = 10;
-      const h3Indexes = polygonToCells(h3Polygon, h3Resolution);
+      const h3Indexes = polyfill(h3Polygon, h3Resolution);
       setH3Indexes(h3Indexes);
 
       const newHexagons: Hexagon[] = h3Indexes.map((index) => {
         const boundary = cellToBoundary(index, true); // Get boundary as [lat, lng]
-        return boundary.map(([lat, lng]) => ({lat, lng}));
+        return boundary.map(([lat, lng]) => ({lng, lat}));
       });
 
       // Calculate area with Turf.js which expects GeoJSON standard [lng, lat]
