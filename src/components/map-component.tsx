@@ -4,6 +4,7 @@ import {useEffect} from 'react';
 import type {LatLngExpression} from 'leaflet';
 import {MapContainer, TileLayer, Polygon, useMap} from 'react-leaflet';
 import L from 'leaflet';
+import { Skeleton } from './ui/skeleton';
 
 type MapComponentProps = {
   polygon: LatLngExpression[] | null;
@@ -31,7 +32,13 @@ export default function MapComponent({polygon, hexagons}: MapComponentProps) {
   const accentColor = 'hsl(var(--accent))';
 
   return (
-    <MapContainer center={initialCenter} zoom={initialZoom} scrollWheelZoom={true} className="h-full w-full">
+    <MapContainer
+      center={initialCenter}
+      zoom={initialZoom}
+      scrollWheelZoom={true}
+      className="h-full w-full"
+      placeholder={<Skeleton className="h-full w-full" />}
+    >
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
