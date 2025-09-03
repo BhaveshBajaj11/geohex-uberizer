@@ -11,12 +11,12 @@ type Hexagon = {
 };
 
 type MapComponentProps = {
-  polygon: LatLngLiteral[] | null;
+  polygons: LatLngLiteral[][];
   hexagons: Hexagon[];
   hoveredHexIndex: string | null;
 };
 
-export default function MapComponent({polygon, hexagons, hoveredHexIndex}: MapComponentProps) {
+export default function MapComponent({polygons, hexagons, hoveredHexIndex}: MapComponentProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<L.Map | null>(null);
   const featureGroup = useRef<L.FeatureGroup | null>(null);
@@ -45,15 +45,17 @@ export default function MapComponent({polygon, hexagons, hoveredHexIndex}: MapCo
     const accentColor = 'hsl(var(--accent))';
     const highlightColor = 'hsl(var(--accent))';
 
-    if (polygon && polygon.length > 0) {
-      L.polygon(polygon as LatLngExpression[], {
-        color: primaryColor,
-        weight: 2,
-        opacity: 0.9,
-        fillColor: primaryColor,
-        fillOpacity: 0.2,
-      }).addTo(group);
-    }
+    polygons.forEach((polygon) => {
+        if (polygon && polygon.length > 0) {
+            L.polygon(polygon as LatLngExpression[], {
+              color: primaryColor,
+              weight: 2,
+              opacity: 0.9,
+              fillColor: primaryColor,
+              fillOpacity: 0.2,
+            }).addTo(group);
+          }
+    })
 
     hexagons.forEach((hex) => {
       const isHovered = hex.index === hoveredHexIndex;
@@ -71,8 +73,10 @@ export default function MapComponent({polygon, hexagons, hoveredHexIndex}: MapCo
       if (bounds.isValid()) {
         map.fitBounds(bounds, {padding: [50, 50]});
       }
+    } else {
+        map.setView([40.7128, -74.006], 2);
     }
-  }, [polygon, hexagons, hoveredHexIndex]);
+  }, [polygons, hexagons, hoveredHexIndex]);
 
   return <div ref={mapRef} className="h-full w-full" />;
 }

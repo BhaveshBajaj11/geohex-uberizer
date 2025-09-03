@@ -18,32 +18,36 @@ import {
 } from '@/components/ui/sidebar';
 import {useToast} from '@/hooks/use-toast';
 import {Skeleton} from '@/components/ui/skeleton';
-import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import area from '@turf/area';
 import {polygon as turfPolygon} from '@turf/helpers';
-import HexCodeList from '@/components/hex-code-list';
+import PolygonList from '@/components/polygon-list';
 
 const MapComponent = dynamic(() => import('@/components/map-component'), {
   ssr: false,
   loading: () => <Skeleton className="h-full w-full" />,
 });
 
-type Polygon = LatLngLiteral[];
+export type LeafletPolygon = LatLngLiteral[];
+
+export type PolygonData = {
+  id: number;
+  leafletPolygon: LeafletPolygon;
+  area: number;
+  resolution: number;
+  allH3Indexes: string[];
+};
+
 type Hexagon = {
   index: string;
   boundary: LatLngLiteral[];
 };
 
 export default function Home() {
-  const [polygon, setPolygon] = useState<Polygon | null>(null);
-  const [hexagons, setHexagons] = useState<Hexagon[]>([]);
-  const [allH3Indexes, setAllH3Indexes] = useState<string[]>([]);
+  const [polygons, setPolygons] = useState<PolygonData[]>([]);
   const [selectedH3Indexes, setSelectedH3Indexes] = useState<Set<string>>(new Set());
+  const [renderedHexagons, setRenderedHexagons] = useState<Hexagon[]>([]);
   const {toast} = useToast();
   const [mapKey, setMapKey] = useState(Date.now());
-  const [polygonArea, setPolygonArea] = useState<number | null>(null);
-  const [hexagonArea, setHexagonArea] = useState<number | null>(null);
-  const [resolution, setResolution] = useState<number>(10);
   const [hoveredHexIndex, setHoveredHexIndex] = useState<string | null>(null);
 
   useEffect(() => {
@@ -55,14 +59,7 @@ export default function Home() {
         boundary: boundary.map(([lat, lng]) => ({lat, lng})),
       };
     });
-    setHexagons(selectedHexagons);
-
-    // Update hexagon area when selection changes
-    const totalHexagonArea = Array.from(selectedH3Indexes).reduce(
-      (sum, index) => sum + cellArea(index, 'm2'),
-      0
-    );
-    setHexagonArea(totalHexagonArea);
+    setRenderedHexagons(selectedHexagons);
   }, [selectedH3Indexes]);
 
   const handlePolygonSubmit = (data: {wkt: string; resolution: number}) => {
@@ -82,11 +79,11 @@ export default function Home() {
             if (isNaN(lng) || isNaN(lat)) {
               throw new Error(`Invalid coordinate pair found: "${pair.trim()}"`);
             }
-            return [lng, lat]; // Keep as [lng, lat] for turf
+            return [lng, lat]; // Keep as [lng, lat]
           })
         );
 
-      if (rings[0].length < 4) {
+      if (rings.length === 0 || rings[0].length < 4) {
         throw new Error('A polygon must have at least 4 coordinate pairs to close the loop.');
       }
 
@@ -96,29 +93,37 @@ export default function Home() {
         rings[0].push(first);
       }
 
-      const newPolygon: Polygon = rings[0].map(([lng, lat]) => ({lat, lng}));
-      setPolygon(newPolygon);
+      const newLeafletPolygon: LeafletPolygon = rings[0].map(([lng, lat]) => ({lat, lng}));
 
-      // h3-js expects [lat, lng] for polygonToCells
       const h3Polygon = rings.map((ring) => ring.map(([lng, lat]) => [lat, lng]));
       const h3Resolution = data.resolution;
-      setResolution(h3Resolution);
 
-      const h3Indexes = polygonToCells(h3Polygon[0], h3Resolution, true);
+      const h3Indexes = polygonToCells(h3Polygon, h3Resolution);
 
-      setAllH3Indexes(h3Indexes);
-      const newSelectedH3Indexes = new Set(h3Indexes);
-      setSelectedH3Indexes(newSelectedH3Indexes);
+      const turfPoly = turfPolygon(rings);
+      const calculatedArea = area(turfPoly);
 
-      // turf expects [lng, lat]
-      const poly = turfPolygon(rings);
-      const calculatedArea = area(poly);
-      setPolygonArea(calculatedArea);
+      const newPolygonData: PolygonData = {
+        id: Date.now(),
+        leafletPolygon: newLeafletPolygon,
+        area: calculatedArea,
+        resolution: h3Resolution,
+        allH3Indexes: h3Indexes,
+      };
+
+      setPolygons((prev) => [...prev, newPolygonData]);
+
+      // Add new indexes to selection
+      setSelectedH3Indexes((prev) => {
+        const newSet = new Set(prev);
+        h3Indexes.forEach((index) => newSet.add(index));
+        return newSet;
+      });
 
       setMapKey(Date.now());
 
       toast({
-        title: 'Success!',
+        title: 'Polygon Added!',
         description: `Generated ${h3Indexes.length} H3 hexagons at resolution ${h3Resolution}.`,
       });
     } catch (error) {
@@ -129,12 +134,6 @@ export default function Home() {
         title: 'Error Processing WKT',
         description: errorMessage,
       });
-      setPolygon(null);
-      setAllH3Indexes([]);
-      setSelectedH3Indexes(new Set());
-      setPolygonArea(null);
-      setHexagonArea(null);
-      setMapKey(Date.now());
     }
   };
 
@@ -150,17 +149,39 @@ export default function Home() {
     });
   };
 
-  const handleSelectAll = (selectAll: boolean) => {
-    if (selectAll) {
-      setSelectedH3Indexes(new Set(allH3Indexes));
-    } else {
-      setSelectedH3Indexes(new Set());
-    }
+  const handleSelectAllInPolygon = (polygonIndexes: string[], selectAll: boolean) => {
+    setSelectedH3Indexes((prev) => {
+      const newSet = new Set(prev);
+      if (selectAll) {
+        polygonIndexes.forEach((index) => newSet.add(index));
+      } else {
+        polygonIndexes.forEach((index) => newSet.delete(index));
+      }
+      return newSet;
+    });
   };
 
   const handleHexHover = (index: string | null) => {
     setHoveredHexIndex(index);
   };
+
+  const handleRemovePolygon = (polygonId: number) => {
+    setPolygons((prev) => prev.filter((p) => p.id !== polygonId));
+    // Optional: remove its hexes from selection as well
+    const polygonToRemove = polygons.find((p) => p.id === polygonId);
+    if (polygonToRemove) {
+      setSelectedH3Indexes((prev) => {
+        const newSet = new Set(prev);
+        polygonToRemove.allH3Indexes.forEach((index) => newSet.delete(index));
+        return newSet;
+      });
+    }
+  };
+
+  const totalHexagonArea = Array.from(selectedH3Indexes).reduce(
+    (sum, index) => sum + cellArea(index, 'm2'),
+    0
+  );
 
   return (
     <SidebarProvider>
@@ -173,37 +194,15 @@ export default function Home() {
         </SidebarHeader>
         <SidebarContent>
           <PolygonForm onSubmit={handlePolygonSubmit} />
-          {polygonArea !== null && (
-            <Card className="mx-2 mt-4">
-              <CardHeader>
-                <CardTitle>Area Calculation</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <h3 className="font-medium">Polygon Area</h3>
-                  <p>{(polygonArea / 1_000_000).toFixed(4)} km²</p>
-                  <p className="text-sm text-muted-foreground">{polygonArea.toFixed(2)} m²</p>
-                </div>
-                {hexagonArea !== null && (
-                  <div>
-                    <h3 className="font-medium">Total Hexagon Area</h3>
-                    <p>{(hexagonArea / 1_000_000).toFixed(4)} km²</p>
-                    <p className="text-sm text-muted-foreground">{hexagonArea.toFixed(2)} m²</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
-          {allH3Indexes.length > 0 && (
-            <HexCodeList
-              allH3Indexes={allH3Indexes}
-              selectedH3Indexes={selectedH3Indexes}
-              resolution={resolution}
-              onSelectionChange={handleHexagonSelectionChange}
-              onSelectAll={handleSelectAll}
-              onHexHover={handleHexHover}
-            />
-          )}
+          <PolygonList
+            polygons={polygons}
+            selectedH3Indexes={selectedH3Indexes}
+            onSelectionChange={handleHexagonSelectionChange}
+            onSelectAll={handleSelectAllInPolygon}
+            onHexHover={handleHexHover}
+            onRemovePolygon={handleRemovePolygon}
+            totalHexagonArea={totalHexagonArea}
+          />
         </SidebarContent>
       </Sidebar>
       <SidebarInset>
@@ -211,7 +210,12 @@ export default function Home() {
           <div className="absolute left-4 top-4 z-10">
             <SidebarTrigger />
           </div>
-          <MapComponent key={mapKey} polygon={polygon} hexagons={hexagons} hoveredHexIndex={hoveredHexIndex} />
+          <MapComponent
+            key={mapKey}
+            polygons={polygons.map((p) => p.leafletPolygon)}
+            hexagons={renderedHexagons}
+            hoveredHexIndex={hoveredHexIndex}
+          />
         </main>
       </SidebarInset>
     </SidebarProvider>
