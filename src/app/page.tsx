@@ -1,3 +1,4 @@
+
 'use client';
 
 import {useState} from 'react';
@@ -44,13 +45,13 @@ export default function Home() {
         throw new Error('Invalid WKT format: Must start with POLYGON.');
       }
 
-      const coordString = wkt.substring(wkt.indexOf('(') + 1, wkt.lastIndexOf(')')).trim();
+      const coordString = wkt.substring(wkt.indexOf('(') + 1, wkt.lastIndexOf(')'));
       // Handle POLYGON ((...))
       const rings = coordString.substring(coordString.indexOf('(') + 1, coordString.lastIndexOf(')'));
 
       const pairs = rings.split(',');
-      if (pairs.length < 3) {
-        throw new Error('A polygon must have at least 3 coordinate pairs.');
+      if (pairs.length < 4) {
+        throw new Error('A polygon must have at least 4 coordinate pairs to close the loop.');
       }
 
       const coordinates = pairs.map((pair) => {
@@ -61,21 +62,28 @@ export default function Home() {
         return {lng, lat};
       });
 
+      // Ensure the polygon is closed
+      const first = coordinates[0];
+      const last = coordinates[coordinates.length - 1];
+      if (first.lat !== last.lat || first.lng !== last.lng) {
+        coordinates.push(first);
+      }
+
       const newPolygon: Polygon = coordinates.map(({lat, lng}) => ({lat, lng}));
       setPolygon(newPolygon);
 
-      // H3.js expects [lat, lng] for polygons
-      const h3Polygon = coordinates.map(({lat, lng}) => [lat, lng]);
+      // h3-js expects GeoJSON-style polygons: an array of rings, where each ring is an array of [lng, lat] pairs
+      const h3Polygon = [coordinates.map(({lng, lat}) => [lng, lat])];
       const h3Resolution = 10;
-      const h3Indexes = polygonToCells(h3Polygon, h3Resolution, true);
+      const h3Indexes = polygonToCells(h3Polygon, h3Resolution);
       setH3Indexes(h3Indexes);
 
       const newHexagons: Hexagon[] = h3Indexes.map((index) => {
-        const boundary = cellToBoundary(index, true);
+        const boundary = cellToBoundary(index, true); // Get boundary as [lat, lng]
         return boundary.map(([lat, lng]) => ({lat, lng}));
       });
 
-      // Calculate area
+      // Calculate area with Turf.js which expects GeoJSON standard [lng, lat]
       const turfCoords = coordinates.map(({lng, lat}) => [lng, lat]);
       const poly = turfPolygon([turfCoords]);
       const calculatedArea = area(poly);
