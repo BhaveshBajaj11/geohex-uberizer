@@ -1,7 +1,7 @@
 'use client';
 
 import {useEffect, useState} from 'react';
-import {AdvancedMarker, Map, useMap} from '@vis.gl/react-google-maps';
+import {Map, useMap} from '@vis.gl/react-google-maps';
 import type {LatLngLiteral} from 'google.maps';
 
 type MapComponentProps = {
