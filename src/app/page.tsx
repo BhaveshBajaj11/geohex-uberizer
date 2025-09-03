@@ -1,9 +1,9 @@
 
 'use client';
 
-import {useState} from 'react';
+import {useState, useEffect} from 'react';
 import type {LatLngLiteral} from 'leaflet';
-import {cellToBoundary, polygonToCellsExperimental, cellArea} from 'h3-js';
+import {cellToBoundary, polygonToCells, cellArea} from 'h3-js';
 import {Layers} from 'lucide-react';
 import dynamic from 'next/dynamic';
 import PolygonForm from '@/components/polygon-form';
@@ -33,12 +33,29 @@ type Hexagon = LatLngLiteral[];
 export default function Home() {
   const [polygon, setPolygon] = useState<Polygon | null>(null);
   const [hexagons, setHexagons] = useState<Hexagon[]>([]);
-  const [h3Indexes, setH3Indexes] = useState<string[]>([]);
+  const [allH3Indexes, setAllH3Indexes] = useState<string[]>([]);
+  const [selectedH3Indexes, setSelectedH3Indexes] = useState<Set<string>>(new Set());
   const {toast} = useToast();
   const [mapKey, setMapKey] = useState(Date.now());
   const [polygonArea, setPolygonArea] = useState<number | null>(null);
   const [hexagonArea, setHexagonArea] = useState<number | null>(null);
   const [resolution, setResolution] = useState<number>(10);
+
+  useEffect(() => {
+    // Update map hexagons when selection changes
+    const newHexagons: Hexagon[] = Array.from(selectedH3Indexes).map((index) => {
+      const boundary = cellToBoundary(index, false); // Returns [lat, lng]
+      return boundary.map(([lat, lng]) => ({lat, lng}));
+    });
+    setHexagons(newHexagons);
+
+    // Update hexagon area when selection changes
+    const totalHexagonArea = Array.from(selectedH3Indexes).reduce(
+      (sum, index) => sum + cellArea(index, 'm2'),
+      0
+    );
+    setHexagonArea(totalHexagonArea);
+  }, [selectedH3Indexes]);
 
   const handlePolygonSubmit = (data: {wkt: string; resolution: number}) => {
     try {
@@ -78,27 +95,23 @@ export default function Home() {
       const h3Polygon = rings.map((ring) => ring.map(({lat, lng}) => [lat, lng]));
       const h3Resolution = data.resolution;
       setResolution(h3Resolution);
-      const h3Indexes = polygonToCellsExperimental(h3Polygon, h3Resolution,"containmentOverlapping");
-      setH3Indexes(h3Indexes);
 
-      const newHexagons: Hexagon[] = h3Indexes.map((index) => {
-        const boundary = cellToBoundary(index, false); // Returns [lat, lng]
-        return boundary.map(([lat, lng]) => ({lat, lng}));
-      });
+      const h3Indexes = polygonToCells(h3Polygon, h3Resolution, true);
+
+      setAllH3Indexes(h3Indexes);
+      const newSelectedH3Indexes = new Set(h3Indexes);
+      setSelectedH3Indexes(newSelectedH3Indexes);
 
       const turfCoords = rings.map((ring) => ring.map(({lng, lat}) => [lng, lat]));
       const poly = turfPolygon(turfCoords);
       const calculatedArea = area(poly);
       setPolygonArea(calculatedArea);
 
-      updateHexagonArea(h3Indexes);
-
-      setHexagons(newHexagons);
       setMapKey(Date.now());
 
       toast({
         title: 'Success!',
-        description: `Generated ${newHexagons.length} H3 hexagons at resolution ${h3Resolution}.`,
+        description: `Generated ${h3Indexes.length} H3 hexagons at resolution ${h3Resolution}.`,
       });
     } catch (error) {
       console.error(error);
@@ -109,31 +122,33 @@ export default function Home() {
         description: errorMessage,
       });
       setPolygon(null);
-      setHexagons([]);
+      setAllH3Indexes([]);
+      setSelectedH3Indexes(new Set());
       setPolygonArea(null);
       setHexagonArea(null);
-      setH3Indexes([]);
       setMapKey(Date.now());
     }
   };
-  
-  const updateHexagonArea = (currentIndexes: string[]) => {
-    const totalHexagonArea = currentIndexes.reduce((sum, index) => sum + cellArea(index, 'm2'), 0);
-    setHexagonArea(totalHexagonArea);
-  };
 
-  const handleRemoveHexagon = (indexToRemove: string) => {
-    const newH3Indexes = h3Indexes.filter((index) => index !== indexToRemove);
-    setH3Indexes(newH3Indexes);
-
-    const newHexagons = newH3Indexes.map((index) => {
-      const boundary = cellToBoundary(index, false);
-      return boundary.map(([lat, lng]) => ({lat, lng}));
+  const handleHexagonSelectionChange = (index: string, isSelected: boolean) => {
+    setSelectedH3Indexes((prevSelected) => {
+      const newSelected = new Set(prevSelected);
+      if (isSelected) {
+        newSelected.add(index);
+      } else {
+        newSelected.delete(index);
+      }
+      return newSelected;
     });
-    setHexagons(newHexagons);
-    updateHexagonArea(newH3Indexes);
   };
 
+  const handleSelectAll = (selectAll: boolean) => {
+    if (selectAll) {
+      setSelectedH3Indexes(new Set(allH3Indexes));
+    } else {
+      setSelectedH3Indexes(new Set());
+    }
+  };
 
   return (
     <SidebarProvider>
@@ -167,11 +182,13 @@ export default function Home() {
               </CardContent>
             </Card>
           )}
-          {h3Indexes.length > 0 && (
+          {allH3Indexes.length > 0 && (
             <HexCodeList
-              h3Indexes={h3Indexes}
+              allH3Indexes={allH3Indexes}
+              selectedH3Indexes={selectedH3Indexes}
               resolution={resolution}
-              onRemoveHexagon={handleRemoveHexagon}
+              onSelectionChange={handleHexagonSelectionChange}
+              onSelectAll={handleSelectAll}
             />
           )}
         </SidebarContent>
