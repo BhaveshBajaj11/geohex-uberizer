@@ -19,6 +19,7 @@ import {Skeleton} from '@/components/ui/skeleton';
 import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import area from '@turf/area';
 import {polygon as turfPolygon} from '@turf/helpers';
+import HexCodeList from '@/components/hex-code-list';
 
 const MapComponent = dynamic(() => import('@/components/map-component'), {
   ssr: false,
@@ -31,6 +32,7 @@ type Hexagon = LatLngLiteral[];
 export default function Home() {
   const [polygon, setPolygon] = useState<Polygon | null>(null);
   const [hexagons, setHexagons] = useState<Hexagon[]>([]);
+  const [h3Indexes, setH3Indexes] = useState<string[]>([]);
   const {toast} = useToast();
   const [mapKey, setMapKey] = useState(Date.now());
   const [polygonArea, setPolygonArea] = useState<number | null>(null);
@@ -66,6 +68,7 @@ export default function Home() {
       const h3Polygon = coordinates.map(({lat, lng}) => [lat, lng]);
       const h3Resolution = 10;
       const h3Indexes = polygonToCells(h3Polygon, h3Resolution, true);
+      setH3Indexes(h3Indexes);
 
       const newHexagons: Hexagon[] = h3Indexes.map((index) => {
         const boundary = cellToBoundary(index, true);
@@ -96,6 +99,7 @@ export default function Home() {
       setPolygon(null);
       setHexagons([]);
       setPolygonArea(null);
+      setH3Indexes([]);
       setMapKey(Date.now());
     }
   };
@@ -126,6 +130,7 @@ export default function Home() {
               </CardContent>
             </Card>
           )}
+          {h3Indexes.length > 0 && <HexCodeList h3Indexes={h3Indexes} />}
         </SidebarContent>
       </Sidebar>
       <SidebarInset>
