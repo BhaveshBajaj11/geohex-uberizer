@@ -31,7 +31,6 @@ export type LeafletPolygon = LatLngLiteral[];
 
 export type PolygonData = {
   id: number;
-  name: string;
   leafletPolygon: LeafletPolygon;
   area: number;
   resolution: number;
@@ -94,7 +93,7 @@ export default function Home() {
         rings[0].push(first);
       }
 
-      const newLeafletPolygon: LeafletPolygon = rings[0].map(([lng, lat]) => ({lat, lng}));
+      const newLeafletPolygon: LeafletPolygon = rings[0].map(([lng, lat]) => ({lng, lat}));
 
       const h3Polygon = rings.map((ring) => ring.map(([lng, lat]) => [lat, lng]));
       const h3Resolution = data.resolution;
@@ -106,7 +105,6 @@ export default function Home() {
 
       const newPolygonData: PolygonData = {
         id: Date.now(),
-        name: `Polygon ${polygons.length + 1}`,
         leafletPolygon: newLeafletPolygon,
         area: calculatedArea,
         resolution: h3Resolution,
@@ -180,12 +178,6 @@ export default function Home() {
     }
   };
 
-  const handleRenamePolygon = (polygonId: number, newName: string) => {
-    setPolygons((prev) =>
-      prev.map((p) => (p.id === polygonId ? {...p, name: newName} : p))
-    );
-  };
-
   const totalHexagonArea = Array.from(selectedH3Indexes).reduce(
     (sum, index) => sum + cellArea(index, 'm2'),
     0
@@ -209,7 +201,6 @@ export default function Home() {
             onSelectAll={handleSelectAllInPolygon}
             onHexHover={handleHexHover}
             onRemovePolygon={handleRemovePolygon}
-            onRenamePolygon={handleRenamePolygon}
             totalHexagonArea={totalHexagonArea}
           />
         </SidebarContent>

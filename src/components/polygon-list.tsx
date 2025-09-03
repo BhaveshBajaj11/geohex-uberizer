@@ -8,7 +8,6 @@ import HexCodeList from './hex-code-list';
 import {Button} from './ui/button';
 import {Trash2} from 'lucide-react';
 import {Separator} from './ui/separator';
-import EditablePolygonName from './editable-polygon-name';
 
 type PolygonListProps = {
   polygons: PolygonData[];
@@ -17,7 +16,6 @@ type PolygonListProps = {
   onSelectAll: (polygonIndexes: string[], selectAll: boolean) => void;
   onHexHover: (index: string | null) => void;
   onRemovePolygon: (id: number) => void;
-  onRenamePolygon: (id: number, newName: string) => void;
   totalHexagonArea: number;
 };
 
@@ -28,7 +26,6 @@ export default function PolygonList({
   onSelectAll,
   onHexHover,
   onRemovePolygon,
-  onRenamePolygon,
   totalHexagonArea,
 }: PolygonListProps) {
   if (polygons.length === 0) {
@@ -58,16 +55,13 @@ export default function PolygonList({
       </Card>
       <Separator className="my-4" />
       <Accordion type="multiple" className="mx-2 space-y-2">
-        {polygons.map((poly) => (
+        {polygons.map((poly, index) => (
           <AccordionItem value={`item-${poly.id}`} key={poly.id} className="border-none">
             <Card>
               <AccordionTrigger className="p-4 hover:no-underline">
                 <div className="flex justify-between items-center w-full">
                   <div className="text-left flex-grow">
-                    <EditablePolygonName
-                      initialName={poly.name}
-                      onSave={(newName) => onRenamePolygon(poly.id, newName)}
-                    />
+                    <h4 className="font-semibold">Polygon {index + 1}</h4>
                     <p className="text-sm text-muted-foreground mt-1">
                       Res {poly.resolution} &bull; {poly.allH3Indexes.length} Hexagons
                     </p>
