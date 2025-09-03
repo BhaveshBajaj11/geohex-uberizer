@@ -1,3 +1,4 @@
+
 'use client';
 
 import {useState} from 'react';
@@ -29,36 +30,37 @@ export default function Home() {
   const [polygon, setPolygon] = useState<Polygon | null>(null);
   const [hexagons, setHexagons] = useState<Hexagon[]>([]);
   const {toast} = useToast();
-  // Using a key to force re-mount of the map component
   const [mapKey, setMapKey] = useState(Date.now());
 
-  const handlePolygonSubmit = (data: {geoJson: string}) => {
+  const handlePolygonSubmit = (data: {wkt: string}) => {
     try {
-      const parsed = JSON.parse(data.geoJson);
-      let coordinates: number[][] = [];
-
-      if (parsed.type === 'FeatureCollection') {
-        const polygonFeature = parsed.features.find(
-          (f: any) => f.geometry && f.geometry.type === 'Polygon'
-        );
-        if (!polygonFeature) throw new Error('No Polygon geometry found in FeatureCollection.');
-        coordinates = polygonFeature.geometry.coordinates[0];
-      } else if (parsed.type === 'Feature' && parsed.geometry && parsed.geometry.type === 'Polygon') {
-        coordinates = parsed.geometry.coordinates[0];
-      } else if (parsed.type === 'Polygon') {
-        coordinates = parsed.coordinates[0];
-      } else {
-        throw new Error(
-          'Invalid GeoJSON: Must be a Polygon, Feature, or FeatureCollection containing a Polygon.'
-        );
+      const wkt = data.wkt.trim();
+      if (!wkt.toUpperCase().startsWith('POLYGON')) {
+        throw new Error('Invalid WKT format: Must start with POLYGON.');
       }
 
-      // GeoJSON is [lng, lat], Leaflet is {lat, lng}
-      const newPolygon: Polygon = coordinates.map(([lng, lat]) => ({lat, lng}));
+      const coordString = wkt.substring(wkt.indexOf('(') + 1, wkt.lastIndexOf(')')).trim();
+      // Handle POLYGON ((...))
+      const rings = coordString.substring(coordString.indexOf('(') + 1, coordString.lastIndexOf(')'));
+
+      const pairs = rings.split(',');
+      if (pairs.length < 3) {
+        throw new Error('A polygon must have at least 3 coordinate pairs.');
+      }
+
+      const coordinates = pairs.map((pair) => {
+        const [lng, lat] = pair.trim().split(/\s+/).map(Number);
+        if (isNaN(lng) || isNaN(lat)) {
+          throw new Error(`Invalid coordinate pair found: "${pair.trim()}"`);
+        }
+        return {lng, lat};
+      });
+
+      const newPolygon: Polygon = coordinates.map(({lat, lng}) => ({lat, lng}));
       setPolygon(newPolygon);
 
       // H3.js expects [lat, lng] for polygons
-      const h3Polygon = coordinates.map(([lng, lat]) => [lat, lng]);
+      const h3Polygon = coordinates.map(({lat, lng}) => [lat, lng]);
       const h3Resolution = 10;
       const h3Indexes = polygonToCells(h3Polygon, h3Resolution, true);
 
@@ -68,7 +70,7 @@ export default function Home() {
       });
 
       setHexagons(newHexagons);
-      setMapKey(Date.now()); // Change key to force re-render
+      setMapKey(Date.now());
 
       toast({
         title: 'Success!',
@@ -76,15 +78,15 @@ export default function Home() {
       });
     } catch (error) {
       console.error(error);
-      const errorMessage = error instanceof Error ? error.message : 'Invalid GeoJSON format.';
+      const errorMessage = error instanceof Error ? error.message : 'Invalid WKT format.';
       toast({
         variant: 'destructive',
-        title: 'Error Processing GeoJSON',
+        title: 'Error Processing WKT',
         description: errorMessage,
       });
       setPolygon(null);
       setHexagons([]);
-      setMapKey(Date.now()); // Also update key on error to reset map
+      setMapKey(Date.now());
     }
   };
 

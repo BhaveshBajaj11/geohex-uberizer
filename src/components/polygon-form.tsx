@@ -1,3 +1,4 @@
+
 'use client';
 
 import {zodResolver} from '@hookform/resolvers/zod';
@@ -18,19 +19,12 @@ import {
 import {Textarea} from '@/components/ui/textarea';
 
 const formSchema = z.object({
-  geoJson: z
+  wkt: z
     .string()
-    .min(1, 'GeoJSON input cannot be empty.')
+    .min(1, 'WKT input cannot be empty.')
     .refine(
-      (val) => {
-        try {
-          JSON.parse(val);
-          return true;
-        } catch (e) {
-          return false;
-        }
-      },
-      {message: 'Invalid JSON format.'}
+      (val) => val.trim().toUpperCase().startsWith('POLYGON'),
+      {message: 'Input must be a valid WKT POLYGON string.'}
     ),
 });
 
@@ -38,28 +32,14 @@ type PolygonFormProps = {
   onSubmit: (values: z.infer<typeof formSchema>) => void;
 };
 
-const defaultGeoJson = `{
-  "type": "Feature",
-  "properties": {},
-  "geometry": {
-    "type": "Polygon",
-    "coordinates": [
-      [
-        [-74.047285, 40.683921],
-        [-74.047285, 40.735129],
-        [-73.97115, 40.735129],
-        [-73.97115, 40.683921],
-        [-74.047285, 40.683921]
-      ]
-    ]
-  }
-}`;
+const defaultWkt = 'POLYGON ((-74.047285 40.683921, -74.047285 40.735129, -73.97115 40.735129, -73.97115 40.683921, -74.047285 40.683921))';
+
 
 export default function PolygonForm({onSubmit}: PolygonFormProps) {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      geoJson: defaultGeoJson,
+      wkt: defaultWkt,
     },
   });
 
@@ -79,19 +59,19 @@ export default function PolygonForm({onSubmit}: PolygonFormProps) {
       <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6 px-2">
         <FormField
           control={form.control}
-          name="geoJson"
+          name="wkt"
           render={({field}) => (
             <FormItem>
-              <FormLabel>Polygon GeoJSON</FormLabel>
+              <FormLabel>Polygon WKT</FormLabel>
               <FormControl>
                 <Textarea
-                  placeholder="Paste your GeoJSON here..."
+                  placeholder="Paste your WKT here..."
                   className="min-h-[200px] h-96 font-code text-xs"
                   {...field}
                 />
               </FormControl>
               <FormDescription>
-                Input a valid GeoJSON Polygon, Feature, or FeatureCollection.
+                Input a valid Well-Known Text (WKT) Polygon.
               </FormDescription>
               <FormMessage />
             </FormItem>
