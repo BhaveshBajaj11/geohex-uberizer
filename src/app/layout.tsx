@@ -1,6 +1,5 @@
 import type {Metadata} from 'next';
 import './globals.css';
-import {APIProvider} from '@vis.gl/react-google-maps';
 import {Toaster} from '@/components/ui/toaster';
 import {cn} from '@/lib/utils';
 
@@ -22,9 +21,7 @@ export default function RootLayout({
         <link href="https://fonts.googleapis.com/css2?family=Inter&display=swap" rel="stylesheet" />
       </head>
       <body className={cn('font-body antialiased', 'min-h-screen bg-background')}>
-        <APIProvider apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY!}>
-          {children}
-        </APIProvider>
+        {children}
         <Toaster />
       </body>
     </html>

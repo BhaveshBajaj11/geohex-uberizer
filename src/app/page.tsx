@@ -4,6 +4,7 @@ import {useState} from 'react';
 import type {LatLngLiteral} from 'google.maps';
 import {cellToBoundary, polygonToCells} from 'h3-js';
 import {Layers} from 'lucide-react';
+import {APIProvider} from '@vis.gl/react-google-maps';
 
 import MapComponent from '@/components/map-component';
 import PolygonForm from '@/components/polygon-form';
@@ -80,26 +81,28 @@ export default function Home() {
   };
 
   return (
-    <SidebarProvider>
-      <Sidebar>
-        <SidebarHeader>
-          <div className="flex items-center gap-3 p-2">
-            <Layers className="h-8 w-8 text-primary" />
-            <h1 className="font-headline text-xl font-semibold">GeoHex Uberizer</h1>
-          </div>
-        </SidebarHeader>
-        <SidebarContent>
-          <PolygonForm onSubmit={handlePolygonSubmit} />
-        </SidebarContent>
-      </Sidebar>
-      <SidebarInset>
-        <main className="relative h-screen w-full">
-          <div className="absolute left-4 top-4 z-10">
-            <SidebarTrigger />
-          </div>
-          <MapComponent polygon={polygon} hexagons={hexagons} />
-        </main>
-      </SidebarInset>
-    </SidebarProvider>
+    <APIProvider apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY!}>
+      <SidebarProvider>
+        <Sidebar>
+          <SidebarHeader>
+            <div className="flex items-center gap-3 p-2">
+              <Layers className="h-8 w-8 text-primary" />
+              <h1 className="font-headline text-xl font-semibold">GeoHex Uberizer</h1>
+            </div>
+          </SidebarHeader>
+          <SidebarContent>
+            <PolygonForm onSubmit={handlePolygonSubmit} />
+          </SidebarContent>
+        </Sidebar>
+        <SidebarInset>
+          <main className="relative h-screen w-full">
+            <div className="absolute left-4 top-4 z-10">
+              <SidebarTrigger />
+            </div>
+            <MapComponent polygon={polygon} hexagons={hexagons} />
+          </main>
+        </SidebarInset>
+      </SidebarProvider>
+    </APIProvider>
   );
 }
