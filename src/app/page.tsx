@@ -3,7 +3,7 @@
 
 import {useState} from 'react';
 import type {LatLngLiteral} from 'leaflet';
-import {cellToBoundary, polygonToCells} from 'h3-js';
+import {cellToBoundary, polygonToCells, cellArea} from 'h3-js';
 import {Layers} from 'lucide-react';
 import dynamic from 'next/dynamic';
 import PolygonForm from '@/components/polygon-form';
@@ -37,6 +37,7 @@ export default function Home() {
   const {toast} = useToast();
   const [mapKey, setMapKey] = useState(Date.now());
   const [polygonArea, setPolygonArea] = useState<number | null>(null);
+  const [hexagonArea, setHexagonArea] = useState<number | null>(null);
   const [resolution, setResolution] = useState<number>(10);
 
   const handlePolygonSubmit = (data: {wkt: string; resolution: number}) => {
@@ -47,45 +48,51 @@ export default function Home() {
       }
 
       const coordString = wkt.substring(wkt.indexOf('(') + 1, wkt.lastIndexOf(')'));
-      const rings = coordString.substring(coordString.indexOf('(') + 1, coordString.lastIndexOf(')'));
+      const rings = coordString
+        .slice(1, -1)
+        .split('),(')
+        .map((ring) =>
+          ring.split(',').map((pair) => {
+            const [lng, lat] = pair.trim().split(/\s+/).map(Number);
+            if (isNaN(lng) || isNaN(lat)) {
+              throw new Error(`Invalid coordinate pair found: "${pair.trim()}"`);
+            }
+            return {lng, lat};
+          })
+        );
 
-      const pairs = rings.split(',');
-      if (pairs.length < 4) {
+      const outerRing = rings[0];
+      if (outerRing.length < 4) {
         throw new Error('A polygon must have at least 4 coordinate pairs to close the loop.');
       }
 
-      const coordinates = pairs.map((pair) => {
-        const [lng, lat] = pair.trim().split(/\s+/).map(Number);
-        if (isNaN(lng) || isNaN(lat)) {
-          throw new Error(`Invalid coordinate pair found: "${pair.trim()}"`);
-        }
-        return {lng, lat};
-      });
-
-      const first = coordinates[0];
-      const last = coordinates[coordinates.length - 1];
+      const first = outerRing[0];
+      const last = outerRing[outerRing.length - 1];
       if (first.lat !== last.lat || first.lng !== last.lng) {
-        coordinates.push(first);
+        outerRing.push(first);
       }
 
-      const newPolygon: Polygon = coordinates.map(({lat, lng}) => ({lat, lng}));
+      const newPolygon: Polygon = outerRing.map(({lat, lng}) => ({lat, lng}));
       setPolygon(newPolygon);
 
-      const h3Polygon = [coordinates.map(({lat, lng}) => [lat, lng])];
+      const h3Polygon = rings.map((ring) => ring.map(({lat, lng}) => [lat, lng]));
       const h3Resolution = data.resolution;
       setResolution(h3Resolution);
       const h3Indexes = polygonToCells(h3Polygon, h3Resolution);
       setH3Indexes(h3Indexes);
 
       const newHexagons: Hexagon[] = h3Indexes.map((index) => {
-        const boundary = cellToBoundary(index, true);
-        return boundary.map(([lat, lng]) => ({lng, lat}));
+        const boundary = cellToBoundary(index, false); // Returns [lat, lng]
+        return boundary.map(([lat, lng]) => ({lat, lng}));
       });
 
-      const turfCoords = coordinates.map(({lng, lat}) => [lng, lat]);
-      const poly = turfPolygon([turfCoords]);
+      const turfCoords = rings.map((ring) => ring.map(({lng, lat}) => [lng, lat]));
+      const poly = turfPolygon(turfCoords);
       const calculatedArea = area(poly);
       setPolygonArea(calculatedArea);
+
+      const totalHexagonArea = h3Indexes.reduce((sum, index) => sum + cellArea(index, 'm2'), 0);
+      setHexagonArea(totalHexagonArea);
 
       setHexagons(newHexagons);
       setMapKey(Date.now());
@@ -105,6 +112,7 @@ export default function Home() {
       setPolygon(null);
       setHexagons([]);
       setPolygonArea(null);
+      setHexagonArea(null);
       setH3Indexes([]);
       setMapKey(Date.now());
     }
@@ -124,15 +132,21 @@ export default function Home() {
           {polygonArea !== null && (
             <Card className="mx-2 mt-4">
               <CardHeader>
-                <CardTitle>Polygon Area</CardTitle>
+                <CardTitle>Area Calculation</CardTitle>
               </CardHeader>
-              <CardContent>
-                <p>
-                  {(polygonArea / 1_000_000).toFixed(2)} km²
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  {polygonArea.toFixed(2)} m²
-                </p>
+              <CardContent className="space-y-4">
+                <div>
+                  <h3 className="font-medium">Polygon Area</h3>
+                  <p>{(polygonArea / 1_000_000).toFixed(4)} km²</p>
+                  <p className="text-sm text-muted-foreground">{polygonArea.toFixed(2)} m²</p>
+                </div>
+                {hexagonArea !== null && (
+                  <div>
+                    <h3 className="font-medium">Total Hexagon Area</h3>
+                    <p>{(hexagonArea / 1_000_000).toFixed(4)} km²</p>
+                    <p className="text-sm text-muted-foreground">{hexagonArea.toFixed(2)} m²</p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}
