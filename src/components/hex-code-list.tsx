@@ -1,7 +1,7 @@
 
 'use client';
 
-import {Copy} from 'lucide-react';
+import {Copy, X} from 'lucide-react';
 import {Button} from '@/components/ui/button';
 import {
   Card,
@@ -17,9 +17,10 @@ import {useToast} from '@/hooks/use-toast';
 type HexCodeListProps = {
   h3Indexes: string[];
   resolution: number;
+  onRemoveHexagon: (index: string) => void;
 };
 
-export default function HexCodeList({h3Indexes, resolution}: HexCodeListProps) {
+export default function HexCodeList({h3Indexes, resolution, onRemoveHexagon}: HexCodeListProps) {
   const {toast} = useToast();
 
   const handleCopy = () => {
@@ -41,12 +42,23 @@ export default function HexCodeList({h3Indexes, resolution}: HexCodeListProps) {
       <CardContent>
         <ScrollArea className="h-48 w-full rounded-md border p-2 font-code text-xs">
           {h3Indexes.map((hex) => (
-            <div key={hex}>{hex}</div>
+            <div key={hex} className="flex items-center justify-between group hover:bg-muted/50 rounded-sm">
+              <span>{hex}</span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 opacity-0 group-hover:opacity-100"
+                onClick={() => onRemoveHexagon(hex)}
+              >
+                <X className="h-4 w-4" />
+                <span className="sr-only">Remove hexagon {hex}</span>
+              </Button>
+            </div>
           ))}
         </ScrollArea>
       </CardContent>
       <CardFooter>
-        <Button className="w-full" onClick={handleCopy}>
+        <Button className="w-full" onClick={handleCopy} disabled={h3Indexes.length === 0}>
           <Copy className="mr-2 h-4 w-4" />
           Copy All
         </Button>

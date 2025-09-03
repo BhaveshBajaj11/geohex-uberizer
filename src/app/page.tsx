@@ -3,7 +3,7 @@
 
 import {useState} from 'react';
 import type {LatLngLiteral} from 'leaflet';
-import {cellToBoundary, polygonToCells, cellArea} from 'h3-js';
+import {cellToBoundary, polygonToCellsExperimental, cellArea} from 'h3-js';
 import {Layers} from 'lucide-react';
 import dynamic from 'next/dynamic';
 import PolygonForm from '@/components/polygon-form';
@@ -78,7 +78,7 @@ export default function Home() {
       const h3Polygon = rings.map((ring) => ring.map(({lat, lng}) => [lat, lng]));
       const h3Resolution = data.resolution;
       setResolution(h3Resolution);
-      const h3Indexes = polygonToCells(h3Polygon, h3Resolution);
+      const h3Indexes = polygonToCellsExperimental(h3Polygon, h3Resolution,"containmentOverlapping");
       setH3Indexes(h3Indexes);
 
       const newHexagons: Hexagon[] = h3Indexes.map((index) => {
@@ -91,8 +91,7 @@ export default function Home() {
       const calculatedArea = area(poly);
       setPolygonArea(calculatedArea);
 
-      const totalHexagonArea = h3Indexes.reduce((sum, index) => sum + cellArea(index, 'm2'), 0);
-      setHexagonArea(totalHexagonArea);
+      updateHexagonArea(h3Indexes);
 
       setHexagons(newHexagons);
       setMapKey(Date.now());
@@ -117,6 +116,24 @@ export default function Home() {
       setMapKey(Date.now());
     }
   };
+  
+  const updateHexagonArea = (currentIndexes: string[]) => {
+    const totalHexagonArea = currentIndexes.reduce((sum, index) => sum + cellArea(index, 'm2'), 0);
+    setHexagonArea(totalHexagonArea);
+  };
+
+  const handleRemoveHexagon = (indexToRemove: string) => {
+    const newH3Indexes = h3Indexes.filter((index) => index !== indexToRemove);
+    setH3Indexes(newH3Indexes);
+
+    const newHexagons = newH3Indexes.map((index) => {
+      const boundary = cellToBoundary(index, false);
+      return boundary.map(([lat, lng]) => ({lat, lng}));
+    });
+    setHexagons(newHexagons);
+    updateHexagonArea(newH3Indexes);
+  };
+
 
   return (
     <SidebarProvider>
@@ -150,7 +167,13 @@ export default function Home() {
               </CardContent>
             </Card>
           )}
-          {h3Indexes.length > 0 && <HexCodeList h3Indexes={h3Indexes} resolution={resolution} />}
+          {h3Indexes.length > 0 && (
+            <HexCodeList
+              h3Indexes={h3Indexes}
+              resolution={resolution}
+              onRemoveHexagon={handleRemoveHexagon}
+            />
+          )}
         </SidebarContent>
       </Sidebar>
       <SidebarInset>
