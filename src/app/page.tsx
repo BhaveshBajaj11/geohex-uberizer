@@ -1,11 +1,10 @@
 'use client';
 
 import {useState} from 'react';
-import dynamic from 'next/dynamic';
 import type {LatLngLiteral} from 'leaflet';
 import {cellToBoundary, polygonToCells} from 'h3-js';
 import {Layers} from 'lucide-react';
-
+import dynamic from 'next/dynamic';
 import PolygonForm from '@/components/polygon-form';
 import {
   Sidebar,
@@ -30,6 +29,8 @@ export default function Home() {
   const [polygon, setPolygon] = useState<Polygon | null>(null);
   const [hexagons, setHexagons] = useState<Hexagon[]>([]);
   const {toast} = useToast();
+  // Using a key to force re-mount of the map component
+  const [mapKey, setMapKey] = useState(Date.now());
 
   const handlePolygonSubmit = (data: {geoJson: string}) => {
     try {
@@ -67,6 +68,7 @@ export default function Home() {
       });
 
       setHexagons(newHexagons);
+      setMapKey(Date.now()); // Change key to force re-render
 
       toast({
         title: 'Success!',
@@ -82,6 +84,7 @@ export default function Home() {
       });
       setPolygon(null);
       setHexagons([]);
+      setMapKey(Date.now()); // Also update key on error to reset map
     }
   };
 
@@ -103,7 +106,7 @@ export default function Home() {
           <div className="absolute left-4 top-4 z-10">
             <SidebarTrigger />
           </div>
-          <MapComponent polygon={polygon} hexagons={hexagons} />
+          <MapComponent key={mapKey} polygon={polygon} hexagons={hexagons} />
         </main>
       </SidebarInset>
     </SidebarProvider>
