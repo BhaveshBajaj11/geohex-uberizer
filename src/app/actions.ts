@@ -3,6 +3,19 @@
 
 import Papa from 'papaparse';
 
+function getSheetIdAndGid(url: string): {sheetId: string | null; gid: string | null} {
+  const sheetIdRegex = /spreadsheets\/d\/([a-zA-Z0-9-_]+)/;
+  const gidRegex = /gid=([0-9]+)/;
+
+  const sheetIdMatch = url.match(sheetIdRegex);
+  const gidMatch = url.match(gidRegex);
+
+  return {
+    sheetId: sheetIdMatch ? sheetIdMatch[1] : null,
+    gid: gidMatch ? gidMatch[1] : null,
+  };
+}
+
 export async function fetchGoogleSheetData(url: string): Promise<{
   success: boolean;
   data?: { headers: string[]; rows: string[][] };
@@ -12,18 +25,31 @@ export async function fetchGoogleSheetData(url: string): Promise<{
     return { success: false, error: 'Please enter a valid Google Sheet URL.' };
   }
 
-  // Expects a URL for a sheet published as a CSV
-  // e.g., https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID}
-  if (!url.includes('export?format=csv')) {
-      return { success: false, error: 'URL must be for a sheet published to the web as a CSV file.' };
+  const { sheetId, gid } = getSheetIdAndGid(url);
+
+  if (!sheetId) {
+    return { success: false, error: 'Could not parse Sheet ID from the URL.' };
   }
 
+  // If GID is not in the original URL, it defaults to the first sheet (gid=0)
+  const gidValue = gid ?? '0';
+  const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gidValue}`;
+  
   try {
-    const response = await fetch(url);
+    const response = await fetch(csvUrl);
     if (!response.ok) {
+      if (response.status === 400) {
+        throw new Error('Failed to fetch sheet. This might be a private sheet or an invalid URL. Please ensure "Anyone with the link can view".');
+      }
       throw new Error(`Failed to fetch sheet. Status: ${response.status}`);
     }
     const text = await response.text();
+    
+    // Check for HTML response which indicates an error page (e.g. login required)
+    if (text.trim().startsWith('<!DOCTYPE html>')) {
+        throw new Error('Failed to fetch sheet data. The URL may be for a private sheet. Please ensure "Anyone with the link can view".');
+    }
+
     const result = Papa.parse<string[]>(text, {
         skipEmptyLines: true,
     });

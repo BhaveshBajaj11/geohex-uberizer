@@ -157,7 +157,7 @@ export default function GoogleSheetForm({ onSubmit }: GoogleSheetFormProps) {
                 </div>
               </FormControl>
               <FormDescription>
-                Publish your sheet to the web as a CSV and paste the link here.
+                Paste the URL of a public Google Sheet. Make sure sharing is set to 'Anyone with the link can view'.
               </FormDescription>
               <FormMessage />
             </FormItem>
@@ -240,7 +240,7 @@ export default function GoogleSheetForm({ onSubmit }: GoogleSheetFormProps) {
             <FormItem>
               <FormLabel>H3 Resolution</FormLabel>
               <Select
-                onValueChange={field.onChange}
+                onValueChange={(value) => field.onChange(parseInt(value, 10))}
                 defaultValue={String(field.value)}
               >
                 <FormControl>
