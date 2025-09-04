@@ -8,12 +8,23 @@ import L from 'leaflet';
 type Hexagon = {
   index: string;
   boundary: LatLngLiteral[];
+  number: number;
 };
 
 type MapComponentProps = {
   polygons: LatLngLiteral[][];
   hexagons: Hexagon[];
   hoveredHexIndex: string | null;
+};
+
+const getCenter = (boundary: LatLngLiteral[]): LatLngExpression => {
+  const lats = boundary.map(p => p.lat);
+  const lngs = boundary.map(p => p.lng);
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const minLng = Math.min(...lngs);
+  const maxLng = Math.max(...lngs);
+  return [(minLat + maxLat) / 2, (minLng + maxLng) / 2];
 };
 
 export default function MapComponent({polygons, hexagons, hoveredHexIndex}: MapComponentProps) {
@@ -66,6 +77,16 @@ export default function MapComponent({polygons, hexagons, hoveredHexIndex}: MapC
         fillColor: isHovered ? highlightColor : 'red',
         fillOpacity: isHovered ? 0.6 : 0.2,
       }).addTo(group);
+
+      const center = getCenter(hex.boundary);
+      const numberIcon = L.divIcon({
+          className: 'hexagon-number-label',
+          html: `<div style="font-size: 10px; font-weight: bold; color: white; text-shadow: 1px 1px 2px black;">${hex.number}</div>`,
+          iconSize: [20, 20],
+          iconAnchor: [10, 10]
+      });
+
+      L.marker(center, { icon: numberIcon }).addTo(group);
     });
 
     if (group.getLayers().length > 0) {

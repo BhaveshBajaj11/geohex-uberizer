@@ -36,6 +36,7 @@ export type PolygonData = {
 type Hexagon = {
   index: string;
   boundary: LatLngLiteral[];
+  number: number;
 };
 
 export default function Home() {
@@ -48,11 +49,12 @@ export default function Home() {
 
   useEffect(() => {
     // Update map hexagons when selection changes
-    const selectedHexagons: Hexagon[] = Array.from(selectedH3Indexes).map((index) => {
+    const selectedHexagons: Hexagon[] = Array.from(selectedH3Indexes).map((index, i) => {
       const boundary = cellToBoundary(index, true); // Returns [lat, lng]
       return {
         index,
         boundary: boundary.map(([lat, lng]) => ({lat, lng})),
+        number: i + 1,
       };
     });
     setRenderedHexagons(selectedHexagons);
