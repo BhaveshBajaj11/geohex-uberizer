@@ -81,9 +81,9 @@ export default function MapComponent({polygons, hexagons, hoveredHexIndex}: MapC
       const center = getCenter(hex.boundary);
       const numberIcon = L.divIcon({
           className: 'hexagon-number-label',
-          html: `<div style="font-size: 10px; font-weight: bold; color: white; text-shadow: 1px 1px 2px black;">${hex.number}</div>`,
-          iconSize: [20, 20],
-          iconAnchor: [10, 10]
+          html: `<div style="font-size: 12px; font-weight: bold; color: white; text-shadow: 0 0 5px black, 0 0 5px black;">${hex.number}</div>`,
+          iconSize: [24, 24],
+          iconAnchor: [12, 12]
       });
 
       L.marker(center, { icon: numberIcon }).addTo(group);
