@@ -3,7 +3,7 @@
 
 import type {PolygonData} from '@/app/page';
 import {Accordion, AccordionContent, AccordionItem, AccordionTrigger} from '@/components/ui/accordion';
-import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
+import {Card} from '@/components/ui/card';
 import HexCodeList from './hex-code-list';
 import {Button} from './ui/button';
 import {Trash2} from 'lucide-react';
@@ -16,7 +16,6 @@ type PolygonListProps = {
   onSelectAll: (polygonIndexes: string[], selectAll: boolean) => void;
   onHexHover: (index: string | null) => void;
   onRemovePolygon: (id: number) => void;
-  totalHexagonArea: number;
 };
 
 export default function PolygonList({
@@ -26,33 +25,18 @@ export default function PolygonList({
   onSelectAll,
   onHexHover,
   onRemovePolygon,
-  totalHexagonArea,
 }: PolygonListProps) {
   if (polygons.length === 0) {
-    return null;
+    return (
+      <div className="p-4 text-center text-sm text-muted-foreground">
+        <p>No polygons added yet.</p>
+        <p className="mt-2">Use the form above to generate H3 hexagons from a WKT polygon.</p>
+      </div>
+    );
   }
-
-  const totalPolygonArea = polygons.reduce((sum, p) => sum + p.area, 0);
 
   return (
     <>
-      <Card className="mx-2 mt-4">
-        <CardHeader>
-          <CardTitle>Area Calculation</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <h3 className="font-medium">Total Polygon Area</h3>
-            <p>{(totalPolygonArea / 1_000_000).toFixed(4)} km²</p>
-            <p className="text-sm text-muted-foreground">{totalPolygonArea.toFixed(2)} m²</p>
-          </div>
-          <div>
-            <h3 className="font-medium">Total Selected Hexagon Area</h3>
-            <p>{(totalHexagonArea / 1_000_000).toFixed(4)} km²</p>
-            <p className="text-sm text-muted-foreground">{totalHexagonArea.toFixed(2)} m²</p>
-          </div>
-        </CardContent>
-      </Card>
       <Separator className="my-4" />
       <Accordion type="multiple" className="mx-2 space-y-2">
         {polygons.map((poly, index) => (

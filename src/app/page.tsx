@@ -4,7 +4,6 @@
 import {useState, useEffect} from 'react';
 import type {LatLngLiteral} from 'leaflet';
 import {cellToBoundary, polygonToCells} from 'h3-js';
-import {cellArea} from 'h3-js';
 import {Layers} from 'lucide-react';
 import dynamic from 'next/dynamic';
 import PolygonForm from '@/components/polygon-form';
@@ -18,8 +17,6 @@ import {
 } from '@/components/ui/sidebar';
 import {useToast} from '@/hooks/use-toast';
 import {Skeleton} from '@/components/ui/skeleton';
-import area from '@turf/area';
-import {polygon as turfPolygon} from '@turf/helpers';
 import PolygonList from '@/components/polygon-list';
 
 const MapComponent = dynamic(() => import('@/components/map-component'), {
@@ -32,7 +29,6 @@ export type LeafletPolygon = LatLngLiteral[];
 export type PolygonData = {
   id: number;
   leafletPolygon: LeafletPolygon;
-  area: number;
   resolution: number;
   allH3Indexes: string[];
 };
@@ -100,13 +96,9 @@ export default function Home() {
 
       const h3Indexes = polygonToCells(h3Polygon, h3Resolution, true);
 
-      const turfPoly = turfPolygon(rings);
-      const calculatedArea = area(turfPoly);
-
       const newPolygonData: PolygonData = {
         id: Date.now(),
         leafletPolygon: newLeafletPolygon,
-        area: calculatedArea,
         resolution: h3Resolution,
         allH3Indexes: h3Indexes,
       };
@@ -178,11 +170,6 @@ export default function Home() {
     }
   };
 
-  const totalHexagonArea = Array.from(selectedH3Indexes).reduce(
-    (sum, index) => sum + cellArea(index, 'm2'),
-    0
-  );
-
   return (
     <SidebarProvider>
       <Sidebar>
@@ -201,7 +188,6 @@ export default function Home() {
             onSelectAll={handleSelectAllInPolygon}
             onHexHover={handleHexHover}
             onRemovePolygon={handleRemovePolygon}
-            totalHexagonArea={totalHexagonArea}
           />
         </SidebarContent>
       </Sidebar>
