@@ -57,7 +57,9 @@ export default function GoogleSheetForm({ onSubmit }: GoogleSheetFormProps) {
     },
   });
 
-  const { isSubmitting, watch } = form.formState;
+  const { watch, formState } = form;
+  const { isSubmitting } = formState;
+
   const watchedWktColumn = watch('wktColumn');
   const watchedSelectedRow = watch('selectedRow');
 
