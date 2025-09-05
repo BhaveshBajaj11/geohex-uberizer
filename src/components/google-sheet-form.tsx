@@ -5,7 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import * as z from 'zod';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -30,8 +30,9 @@ import { fetchGoogleSheetData } from '@/app/actions';
 
 const formSchema = z.object({
   sheetUrl: z.string().url('Please enter a valid URL.'),
+  terminalIdColumn: z.string().optional(),
   wktColumn: z.string().optional(),
-  selectedRow: z.string().optional(),
+  selectedTerminalId: z.string().optional(),
   resolution: z.coerce.number().min(0).max(15),
 });
 
@@ -41,7 +42,7 @@ type SheetData = {
 };
 
 type GoogleSheetFormProps = {
-  onSubmit: (values: { wkt: string; resolution: number }) => void;
+  onSubmit: (values: { wkts: string[]; resolution: number }) => void;
 };
 
 export default function GoogleSheetForm({ onSubmit }: GoogleSheetFormProps) {
@@ -60,8 +61,25 @@ export default function GoogleSheetForm({ onSubmit }: GoogleSheetFormProps) {
   const { watch, formState } = form;
   const { isSubmitting } = formState;
 
+  const watchedTerminalIdColumn = watch('terminalIdColumn');
   const watchedWktColumn = watch('wktColumn');
-  const watchedSelectedRow = watch('selectedRow');
+  const watchedSelectedTerminalId = watch('selectedTerminalId');
+
+  const uniqueTerminalIds = useMemo(() => {
+    if (!sheetData || !watchedTerminalIdColumn) return [];
+    const terminalIdColumnIndex = sheetData.headers.indexOf(watchedTerminalIdColumn);
+    if (terminalIdColumnIndex === -1) return [];
+    
+    const ids = new Set<string>();
+    sheetData.rows.forEach(row => {
+        const id = row[terminalIdColumnIndex];
+        if (id) {
+            ids.add(id);
+        }
+    });
+    return Array.from(ids).sort();
+  }, [sheetData, watchedTerminalIdColumn]);
+
 
   const handleFetchSheet = async () => {
     const url = form.getValues('sheetUrl');
@@ -75,7 +93,12 @@ export default function GoogleSheetForm({ onSubmit }: GoogleSheetFormProps) {
 
     setIsFetching(true);
     setSheetData(null);
-    form.reset({ ...form.getValues(), wktColumn: undefined, selectedRow: undefined });
+    form.reset({ 
+        ...form.getValues(), 
+        terminalIdColumn: undefined,
+        wktColumn: undefined, 
+        selectedTerminalId: undefined 
+    });
 
     const result = await fetchGoogleSheetData(url);
 
@@ -83,7 +106,7 @@ export default function GoogleSheetForm({ onSubmit }: GoogleSheetFormProps) {
       setSheetData(result.data);
       toast({
         title: 'Sheet Loaded',
-        description: `Found ${result.data.rows.length} rows. Please select the polygon column and row.`,
+        description: `Found ${result.data.rows.length} rows. Please select the required columns.`,
       });
     } else {
       toast({
@@ -97,29 +120,35 @@ export default function GoogleSheetForm({ onSubmit }: GoogleSheetFormProps) {
   };
 
   const handleSubmit = () => {
-    const { wktColumn, selectedRow, resolution } = form.getValues();
-    if (!wktColumn || !selectedRow || !sheetData) {
+    const { terminalIdColumn, wktColumn, selectedTerminalId, resolution } = form.getValues();
+    if (!terminalIdColumn || !wktColumn || !selectedTerminalId || !sheetData) {
       toast({
           variant: 'destructive',
           title: 'Incomplete selection',
-          description: 'Please select a column and a row.',
+          description: 'Please select all required fields.',
       });
       return;
     }
-    const columnIndex = sheetData.headers.indexOf(wktColumn);
-    const rowIndex = parseInt(selectedRow, 10);
-    const wkt = sheetData.rows[rowIndex]?.[columnIndex];
+    
+    const terminalIdColIndex = sheetData.headers.indexOf(terminalIdColumn);
+    const wktColIndex = sheetData.headers.indexOf(wktColumn);
 
-    if (!wkt) {
+    const wkts = sheetData.rows
+        .filter(row => row[terminalIdColIndex] === selectedTerminalId)
+        .map(row => row[wktColIndex])
+        .filter((wkt): wkt is string => !!wkt);
+
+
+    if (wkts.length === 0) {
         toast({
             variant: 'destructive',
-            title: 'WKT data not found',
-            description: 'Could not find WKT data at the selected column and row.',
+            title: 'No polygons found',
+            description: `Could not find any polygons for Terminal ID "${selectedTerminalId}".`,
         });
         return;
     }
     
-    onSubmit({ wkt, resolution });
+    onSubmit({ wkts, resolution });
   };
 
   return (
@@ -166,12 +195,40 @@ export default function GoogleSheetForm({ onSubmit }: GoogleSheetFormProps) {
 
         {sheetData && (
           <>
+             <FormField
+              control={form.control}
+              name="terminalIdColumn"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Terminal ID Column</FormLabel>
+                  <Select
+                    onValueChange={field.onChange}
+                    defaultValue={field.value}
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select terminal ID column" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {sheetData.headers.map((header) => (
+                        <SelectItem key={header} value={header}>
+                          {header}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
             <FormField
               control={form.control}
               name="wktColumn"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Polygon Column</FormLabel>
+                  <FormLabel>Polygon (WKT) Column</FormLabel>
                   <Select
                     onValueChange={field.onChange}
                     defaultValue={field.value}
@@ -194,35 +251,28 @@ export default function GoogleSheetForm({ onSubmit }: GoogleSheetFormProps) {
               )}
             />
 
-            {watchedWktColumn && (
+            {watchedTerminalIdColumn && watchedWktColumn && (
               <FormField
                 control={form.control}
-                name="selectedRow"
+                name="selectedTerminalId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Polygon Row</FormLabel>
+                    <FormLabel>Select Terminal ID</FormLabel>
                     <Select
                       onValueChange={field.onChange}
                       defaultValue={field.value}
                     >
                       <FormControl>
                         <SelectTrigger>
-                          <SelectValue placeholder="Select a row" />
+                          <SelectValue placeholder="Select a Terminal ID" />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {sheetData.rows.map((row, index) => {
-                          const wktColumnIndex = sheetData.headers.indexOf(
-                            watchedWktColumn
-                          );
-                          const cellValue =
-                            row[wktColumnIndex]?.substring(0, 40) + '...';
-                          return (
-                            <SelectItem key={index} value={String(index)}>
-                              Row {index + 2}: {cellValue}
+                        {uniqueTerminalIds.map((id) => (
+                            <SelectItem key={id} value={id}>
+                              {id}
                             </SelectItem>
-                          );
-                        })}
+                        ))}
                       </SelectContent>
                     </Select>
                     <FormMessage />
@@ -266,7 +316,7 @@ export default function GoogleSheetForm({ onSubmit }: GoogleSheetFormProps) {
         <Button
           type="submit"
           className="w-full"
-          disabled={isSubmitting || isFetching || !watchedWktColumn || !watchedSelectedRow}
+          disabled={isSubmitting || isFetching || !watchedSelectedTerminalId}
         >
           {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           Generate Hexagons

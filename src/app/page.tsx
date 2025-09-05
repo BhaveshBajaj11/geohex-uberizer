@@ -60,73 +60,87 @@ export default function Home() {
     setRenderedHexagons(selectedHexagons);
   }, [selectedH3Indexes]);
 
-  const handlePolygonSubmit = (data: {wkt: string; resolution: number}) => {
-    try {
-      const wkt = data.wkt.trim();
-      if (!wkt.toUpperCase().startsWith('POLYGON')) {
-        throw new Error('Invalid WKT format: Must start with POLYGON.');
+  const handlePolygonSubmit = (data: {wkts: string[]; resolution: number}) => {
+    let totalHexagons = 0;
+    const newPolygonsData: PolygonData[] = [];
+    const newH3Indexes: string[] = [];
+
+    data.wkts.forEach((wktString) => {
+      try {
+        const wkt = wktString.trim();
+        if (!wkt.toUpperCase().startsWith('POLYGON')) {
+          throw new Error('Invalid WKT format: Must start with POLYGON.');
+        }
+
+        const coordString = wkt.substring(wkt.indexOf('(') + 1, wkt.lastIndexOf(')'));
+        const rings = coordString
+          .slice(1, -1)
+          .split('),(')
+          .map((ring) =>
+            ring.split(',').map((pair) => {
+              const [lng, lat] = pair.trim().split(/\s+/).map(Number);
+              if (isNaN(lng) || isNaN(lat)) {
+                throw new Error(`Invalid coordinate pair found: "${pair.trim()}"`);
+              }
+              return [lng, lat];
+            })
+          );
+
+        if (rings.length === 0 || rings[0].length < 4) {
+          throw new Error('A polygon must have at least 4 coordinate pairs to close the loop.');
+        }
+
+        const first = rings[0][0];
+        const last = rings[0][rings[0].length - 1];
+        if (first[0] !== last[0] || first[1] !== last[1]) {
+          rings[0].push(first);
+        }
+
+        const newLeafletPolygon: LeafletPolygon = rings[0].map(([lng, lat]) => ({lat, lng}));
+
+        const h3Polygon = rings.map((ring) => ring.map(([lng, lat]) => [lat, lng]));
+        const h3Resolution = data.resolution;
+
+        const h3Indexes = polygonToCellsExperimental(h3Polygon, h3Resolution, "containmentOverlapping", false);
+        totalHexagons += h3Indexes.length;
+
+        const newPolygonData: PolygonData = {
+          id: Date.now() + Math.random(),
+          leafletPolygon: newLeafletPolygon,
+          resolution: h3Resolution,
+          allH3Indexes: h3Indexes,
+        };
+        newPolygonsData.push(newPolygonData);
+        newH3Indexes.push(...h3Indexes);
+
+      } catch (error) {
+        console.error(error);
+        const errorMessage = error instanceof Error ? error.message : 'Invalid WKT format.';
+        toast({
+          variant: 'destructive',
+          title: 'Error Processing WKT',
+          description: errorMessage,
+        });
+        // Stop processing this batch if one fails
+        throw error;
       }
+    });
 
-      const coordString = wkt.substring(wkt.indexOf('(') + 1, wkt.lastIndexOf(')'));
-      const rings = coordString
-        .slice(1, -1)
-        .split('),(')
-        .map((ring) =>
-          ring.split(',').map((pair) => {
-            const [lng, lat] = pair.trim().split(/\s+/).map(Number);
-            if (isNaN(lng) || isNaN(lat)) {
-              throw new Error(`Invalid coordinate pair found: "${pair.trim()}"`);
-            }
-            return [lng, lat];
-          })
-        );
-
-      if (rings.length === 0 || rings[0].length < 4) {
-        throw new Error('A polygon must have at least 4 coordinate pairs to close the loop.');
-      }
-
-      const first = rings[0][0];
-      const last = rings[0][rings[0].length - 1];
-      if (first[0] !== last[0] || first[1] !== last[1]) {
-        rings[0].push(first);
-      }
-
-      const newLeafletPolygon: LeafletPolygon = rings[0].map(([lng, lat]) => ({lat, lng}));
-
-      const h3Polygon = rings.map((ring) => ring.map(([lng, lat]) => [lat, lng]));
-      const h3Resolution = data.resolution;
-
-      const h3Indexes = polygonToCellsExperimental(h3Polygon, h3Resolution, "containmentOverlapping", false);
-
-      const newPolygonData: PolygonData = {
-        id: Date.now(),
-        leafletPolygon: newLeafletPolygon,
-        resolution: h3Resolution,
-        allH3Indexes: h3Indexes,
-      };
-
-      setPolygons((prev) => [...prev, newPolygonData]);
+    if(newPolygonsData.length > 0) {
+      setPolygons((prev) => [...prev, ...newPolygonsData]);
 
       // Add new indexes to selection
       setSelectedH3Indexes((prev) => {
         const newSet = new Set(prev);
-        h3Indexes.forEach((index) => newSet.add(index));
+        newH3Indexes.forEach((index) => newSet.add(index));
         return newSet;
       });
 
       setMapKey(Date.now());
 
       toast({
-        title: 'Polygon Added!',
-        description: `Generated ${h3Indexes.length} H3 hexagons at resolution ${h3Resolution}.`,
-      });
-    } catch (error) {
-      console.error(error);
-      const errorMessage = error instanceof Error ? error.message : 'Invalid WKT format.';
-      toast({
-        variant: 'destructive',
-        title: 'Error Processing WKT',
-        description: errorMessage,
+        title: `${newPolygonsData.length} Polygon(s) Added!`,
+        description: `Generated ${totalHexagons} H3 hexagons at resolution ${data.resolution}.`,
       });
     }
   };

@@ -38,14 +38,14 @@ const formSchema = z.object({
   resolution: z.coerce.number().min(0).max(15),
 });
 
-type PolygonFormProps = {
-  onSubmit: (values: z.infer<typeof formSchema>) => void;
+type ManualPolygonFormProps = {
+  onSubmit: (values: { wkts: string[]; resolution: number }) => void;
 };
 
 const defaultWkt =
   'POLYGON ((78.8232031 11.0973196, 78.823187 11.0964142, 78.8234606 11.0963879, 78.823407 11.0972091, 78.8232031 11.0973196))';
 
-function ManualPolygonForm({ onSubmit }: PolygonFormProps) {
+function ManualPolygonForm({ onSubmit }: ManualPolygonFormProps) {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -59,7 +59,7 @@ function ManualPolygonForm({ onSubmit }: PolygonFormProps) {
   const handleSubmit = (values: z.infer<typeof formSchema>) => {
     return new Promise<void>((resolve) => {
       setTimeout(() => {
-        onSubmit(values);
+        onSubmit({ wkts: [values.wkt], resolution: values.resolution });
         resolve();
       }, 500);
     });
@@ -94,7 +94,7 @@ function ManualPolygonForm({ onSubmit }: PolygonFormProps) {
           render={({ field }) => (
             <FormItem>
               <FormLabel>H3 Resolution</FormLabel>
-              <Select onValueChange={field.onChange} defaultValue={String(field.value)}>
+              <Select onValueChange={(val) => field.onChange(parseInt(val, 10))} defaultValue={String(field.value)}>
                 <FormControl>
                   <SelectTrigger>
                     <SelectValue placeholder="Select a resolution" />
@@ -125,7 +125,7 @@ function ManualPolygonForm({ onSubmit }: PolygonFormProps) {
 }
 
 
-export default function PolygonForm({ onSubmit }: PolygonFormProps) {
+export default function PolygonForm({ onSubmit }: ManualPolygonFormProps) {
   return (
     <Tabs defaultValue="manual" className="w-full">
       <TabsList className="grid w-full grid-cols-2">
