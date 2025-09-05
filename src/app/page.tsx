@@ -65,7 +65,7 @@ export default function Home() {
     const newPolygonsData: PolygonData[] = [];
     const newH3Indexes: string[] = [];
 
-    data.wkts.forEach((wktString) => {
+    data.wkts.forEach((wktString, i) => {
       try {
         const wkt = wktString.trim();
         if (!wkt.toUpperCase().startsWith('POLYGON')) {
@@ -114,15 +114,14 @@ export default function Home() {
         newH3Indexes.push(...h3Indexes);
 
       } catch (error) {
-        console.error(error);
+        console.error(`Error processing WKT string #${i + 1}:`, wktString, error);
         const errorMessage = error instanceof Error ? error.message : 'Invalid WKT format.';
         toast({
           variant: 'destructive',
-          title: 'Error Processing WKT',
+          title: `Error in Polygon #${i + 1}`,
           description: errorMessage,
         });
-        // Stop processing this batch if one fails
-        throw error;
+        // Continue to next WKT string instead of stopping
       }
     });
 
