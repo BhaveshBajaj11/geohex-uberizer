@@ -50,10 +50,10 @@ export default function Home() {
   useEffect(() => {
     // Update map hexagons when selection changes
     const selectedHexagons: Hexagon[] = Array.from(selectedH3Indexes).map((index, i) => {
-      const boundary = cellToBoundary(index, true); // Returns [lat, lng]
+      const boundary = cellToBoundary(index, true); // Returns [lng, lat]
       return {
         index,
-        boundary: boundary.map(([lat, lng]) => ({lat, lng})),
+        boundary: boundary.map(([lng, lat]) => ({lat, lng})), // This is the correct mapping for Leaflet
         number: i + 1,
       };
     });
@@ -91,12 +91,12 @@ export default function Home() {
         rings[0].push(first);
       }
 
-      const newLeafletPolygon: LeafletPolygon = rings[0].map(([lng, lat]) => ({lng, lat}));
+      const newLeafletPolygon: LeafletPolygon = rings[0].map(([lng, lat]) => ({lat, lng}));
 
       const h3Polygon = rings.map((ring) => ring.map(([lng, lat]) => [lat, lng]));
       const h3Resolution = data.resolution;
 
-      const h3Indexes = polygonToCellsExperimental(h3Polygon, h3Resolution,"containmentOverlapping", false);
+      const h3Indexes = polygonToCellsExperimental(h3Polygon, h3Resolution, "containmentOverlapping", false);
 
       const newPolygonData: PolygonData = {
         id: Date.now(),
