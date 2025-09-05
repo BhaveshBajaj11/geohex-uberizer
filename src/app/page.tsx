@@ -3,7 +3,7 @@
 
 import {useState, useEffect} from 'react';
 import type {LatLngLiteral} from 'leaflet';
-import {cellToBoundary, polygonToCells} from 'h3-js';
+import {cellToBoundary, polygonToCellsExperimental} from 'h3-js';
 import {Layers} from 'lucide-react';
 import dynamic from 'next/dynamic';
 import PolygonForm from '@/components/polygon-form';
@@ -96,7 +96,7 @@ export default function Home() {
       const h3Polygon = rings.map((ring) => ring.map(([lng, lat]) => [lat, lng]));
       const h3Resolution = data.resolution;
 
-      const h3Indexes = polygonToCells(h3Polygon, h3Resolution, true);
+      const h3Indexes = polygonToCellsExperimental(h3Polygon, h3Resolution,"containmentOverlapping", false);
 
       const newPolygonData: PolygonData = {
         id: Date.now(),
