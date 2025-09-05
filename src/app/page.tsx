@@ -185,6 +185,17 @@ export default function Home() {
     }
   };
 
+  const handleClearAll = () => {
+    setPolygons([]);
+    setSelectedH3Indexes(new Set());
+    setMapKey(Date.now());
+    toast({
+      title: 'Cleared All Polygons',
+      description: 'The map and list have been reset.',
+    });
+  };
+
+
   return (
     <SidebarProvider>
       <Sidebar>
@@ -203,6 +214,7 @@ export default function Home() {
             onSelectAll={handleSelectAllInPolygon}
             onHexHover={handleHexHover}
             onRemovePolygon={handleRemovePolygon}
+            onClearAll={handleClearAll}
           />
         </SidebarContent>
       </Sidebar>

@@ -16,6 +16,7 @@ type PolygonListProps = {
   onSelectAll: (polygonIndexes: string[], selectAll: boolean) => void;
   onHexHover: (index: string | null) => void;
   onRemovePolygon: (id: number) => void;
+  onClearAll: () => void;
 };
 
 export default function PolygonList({
@@ -25,6 +26,7 @@ export default function PolygonList({
   onSelectAll,
   onHexHover,
   onRemovePolygon,
+  onClearAll,
 }: PolygonListProps) {
   if (polygons.length === 0) {
     return (
@@ -38,6 +40,15 @@ export default function PolygonList({
   return (
     <>
       <Separator className="my-4" />
+      <div className="px-2 mb-4">
+        <Button
+          variant="outline"
+          className="w-full"
+          onClick={onClearAll}
+          >
+            Clear All Polygons ({polygons.length})
+        </Button>
+      </div>
       <Accordion type="multiple" className="mx-2 space-y-2">
         {polygons.map((poly, index) => (
           <AccordionItem value={`item-${poly.id}`} key={poly.id} className="border-none">
