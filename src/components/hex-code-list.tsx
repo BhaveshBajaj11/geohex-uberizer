@@ -57,7 +57,7 @@ export default function HexCodeList({
       <Separator />
       <ScrollArea className="h-48 w-full rounded-md border" onMouseLeave={() => onHexHover(null)}>
         <div className="p-2 font-code text-xs">
-          {allH3Indexes.map((hex) => (
+          {allH3Indexes.map((hex, index) => (
             <div
               key={hex}
               className="flex items-center space-x-2 hover:bg-muted/50 rounded-sm p-1"
@@ -69,7 +69,7 @@ export default function HexCodeList({
                 onCheckedChange={(checked) => onSelectionChange(hex, Boolean(checked))}
               />
               <Label htmlFor={hex} className="w-full">
-                {hex}
+                {index + 1} - {hex}
               </Label>
             </div>
           ))}
