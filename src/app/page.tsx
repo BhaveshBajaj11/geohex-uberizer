@@ -8,16 +8,20 @@ import {Layers} from 'lucide-react';
 import dynamic from 'next/dynamic';
 import PolygonForm from '@/components/polygon-form';
 import {
-  Sidebar,
-  SidebarContent,
-  SidebarHeader,
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from '@/components/ui/sidebar';
+  ResizableSidebar,
+  ResizableSidebarContent,
+  ResizableSidebarHeader,
+  ResizableSidebarInset,
+  ResizableSidebarProvider,
+  ResizableSidebarTrigger,
+} from '@/components/ui/resizable-sidebar';
 import {useToast} from '@/hooks/use-toast';
 import {Skeleton} from '@/components/ui/skeleton';
 import PolygonList from '@/components/polygon-list';
+import ScheduleTab from '@/components/scheduling/schedule-tab';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import type { HexagonSchedule, ScheduledHexagon } from '@/types/scheduling';
+import { generateTimeSlots, getNextAvailableTimeSlot, generateScheduleId, getHexagonNumber, createCustomTimeSlot } from '@/lib/scheduling-utils';
 
 const MapComponent = dynamic(() => import('@/components/map-component'), {
   ssr: false,
@@ -46,6 +50,12 @@ export default function Home() {
   const {toast} = useToast();
   const [mapKey, setMapKey] = useState(Date.now());
   const [hoveredHexIndex, setHoveredHexIndex] = useState<string | null>(null);
+  
+  // Scheduling state
+  const [schedules, setSchedules] = useState<HexagonSchedule[]>([]);
+  const [selectedHexagonsForSchedule, setSelectedHexagonsForSchedule] = useState<Set<string>>(new Set());
+  const [scheduledHexagons, setScheduledHexagons] = useState<ScheduledHexagon[]>([]);
+  const [activeTab, setActiveTab] = useState<string>('input');
 
   useEffect(() => {
     // Update map hexagons when selection changes
@@ -135,11 +145,22 @@ export default function Home() {
         return newSet;
       });
 
+      // Clear scheduling state when new hexagons are generated
+      // This ensures old scheduled hexagons don't persist when switching terminals
+      setSchedules([]);
+      setSelectedHexagonsForSchedule(new Set());
+      setScheduledHexagons([]);
+      
+      // Switch to polygons tab if currently on schedules
+      if (activeTab === 'schedules') {
+        setActiveTab('polygons');
+      }
+
       setMapKey(Date.now());
 
       toast({
         title: `${newPolygonsData.length} Polygon(s) Added!`,
-        description: `Generated ${totalHexagons} H3 hexagons at resolution ${data.resolution}.`,
+        description: `Generated ${totalHexagons} H3 hexagons at resolution ${data.resolution}. Previous schedules have been cleared.`,
       });
     }
   };
@@ -182,6 +203,16 @@ export default function Home() {
         polygonToRemove.allH3Indexes.forEach((index) => newSet.delete(index));
         return newSet;
       });
+      
+      // Also remove any scheduled hexagons from this polygon
+      setScheduledHexagons((prev) => 
+        prev.filter((sh) => !polygonToRemove.allH3Indexes.includes(sh.hexagonId))
+      );
+      setSelectedHexagonsForSchedule((prev) => {
+        const newSet = new Set(prev);
+        polygonToRemove.allH3Indexes.forEach((index) => newSet.delete(index));
+        return newSet;
+      });
     }
   };
 
@@ -189,48 +220,255 @@ export default function Home() {
     setPolygons([]);
     setSelectedH3Indexes(new Set());
     setMapKey(Date.now());
+    
+    // Reset scheduling state when polygons are cleared
+    setSchedules([]);
+    setSelectedHexagonsForSchedule(new Set());
+    setScheduledHexagons([]);
+    
+    // Switch back to polygons tab if currently on schedules
+    if (activeTab === 'schedules') {
+      setActiveTab('polygons');
+    }
+    
     toast({
       title: 'Cleared All Polygons',
-      description: 'The map and list have been reset.',
+      description: 'The map, list, and schedules have been reset.',
     });
   };
 
+  // Scheduling functions
+  const handleScheduleCreate = (name: string, hexagons: ScheduledHexagon[]) => {
+    const newSchedule: HexagonSchedule = {
+      id: generateScheduleId(),
+      name,
+      hexagons,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    
+    setSchedules(prev => [...prev, newSchedule]);
+    setSelectedHexagonsForSchedule(new Set());
+    setScheduledHexagons([]);
+    
+    toast({
+      title: 'Schedule Created',
+      description: `"${name}" has been created with ${hexagons.length} hexagons.`,
+    });
+  };
+
+  const handleScheduleUpdate = (id: string, updates: Partial<HexagonSchedule>) => {
+    setSchedules(prev => prev.map(schedule => {
+      if (schedule.id === id) {
+        const updatedSchedule = { ...schedule, ...updates, updatedAt: new Date() };
+        
+        // Ensure hexagons have correct polygonId
+        if (updatedSchedule.hexagons) {
+          updatedSchedule.hexagons = updatedSchedule.hexagons.map(hexagon => ({
+            ...hexagon,
+            polygonId: polygons.find(p => p.allH3Indexes.includes(hexagon.hexagonId))?.id || hexagon.polygonId,
+          }));
+        }
+        
+        return updatedSchedule;
+      }
+      return schedule;
+    }));
+    
+    toast({
+      title: 'Schedule Updated',
+      description: 'The schedule has been updated successfully.',
+    });
+  };
+
+  const handleScheduleDelete = (id: string) => {
+    setSchedules(prev => prev.filter(schedule => schedule.id !== id));
+    
+    toast({
+      title: 'Schedule Deleted',
+      description: 'The schedule has been deleted successfully.',
+    });
+  };
+
+  const handleScheduleDuplicate = (id: string) => {
+    const scheduleToDuplicate = schedules.find(s => s.id === id);
+    if (scheduleToDuplicate) {
+      const duplicatedSchedule: HexagonSchedule = {
+        ...scheduleToDuplicate,
+        id: generateScheduleId(),
+        name: `${scheduleToDuplicate.name} (Copy)`,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      
+      setSchedules(prev => [...prev, duplicatedSchedule]);
+      
+      toast({
+        title: 'Schedule Duplicated',
+        description: `"${duplicatedSchedule.name}" has been created.`,
+      });
+    }
+  };
+
+  const handleRoutesLoaded = (loadedRoutes: HexagonSchedule[]) => {
+    // Merge loaded routes with existing schedules
+    // Avoid duplicates by checking IDs
+    // Also fix polygonId for each hexagon
+    setSchedules(prev => {
+      const existingIds = new Set(prev.map(s => s.id));
+      const newRoutes = loadedRoutes.filter(route => !existingIds.has(route.id));
+      
+      // Fix polygonId for each hexagon in the loaded routes
+      const fixedRoutes = newRoutes.map(route => ({
+        ...route,
+        hexagons: route.hexagons.map(hexagon => ({
+          ...hexagon,
+          polygonId: polygons.find(p => p.allH3Indexes.includes(hexagon.hexagonId))?.id || 0,
+        })),
+      }));
+      
+      return [...prev, ...fixedRoutes];
+    });
+    
+    toast({
+      title: 'Routes Loaded',
+      description: `Loaded ${loadedRoutes.length} routes from Google Sheets.`,
+    });
+  };
+
+  const handleHexagonSelect = (hexagonId: string) => {
+    const allTimeSlots = generateTimeSlots();
+    const assignedTimeSlots = scheduledHexagons.map(h => h.timeSlot);
+    const nextSlot = getNextAvailableTimeSlot(allTimeSlots, assignedTimeSlots);
+    
+    if (!nextSlot) {
+      // No toast popup - visual indicators in the UI are sufficient
+      return;
+    }
+
+    const hexagonNumber = getHexagonNumber(hexagonId, Array.from(selectedH3Indexes));
+    const polygonId = polygons.find(p => p.allH3Indexes.includes(hexagonId))?.id || 0;
+    
+    const newScheduledHexagon: ScheduledHexagon = {
+      hexagonId,
+      hexagonNumber,
+      timeSlot: nextSlot,
+      polygonId,
+    };
+
+    setScheduledHexagons(prev => [...prev, newScheduledHexagon]);
+    setSelectedHexagonsForSchedule(prev => new Set([...prev, hexagonId]));
+  };
+
+  // New handler for map clicks that triggers time input
+  const handleMapHexagonClick = (hexagonId: string) => {
+    // Check if hexagon is already scheduled
+    const isScheduled = scheduledHexagons.some(h => h.hexagonId === hexagonId);
+    
+    if (isScheduled) {
+      // If already scheduled, deselect it
+      handleHexagonDeselect(hexagonId);
+    } else {
+      // If not scheduled, add it to selected hexagons (this will trigger time input in ScheduleEditor)
+      setSelectedHexagonsForSchedule(prev => new Set([...prev, hexagonId]));
+    }
+  };
+
+  const handleHexagonDeselect = (hexagonId: string) => {
+    setScheduledHexagons(prev => prev.filter(h => h.hexagonId !== hexagonId));
+    setSelectedHexagonsForSchedule(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(hexagonId);
+      return newSet;
+    });
+  };
+
+  const handleHexagonSelectWithCustomTime = (hexagonId: string, timeSlot: any, duration: number) => {
+    const hexagonNumber = getHexagonNumber(hexagonId, Array.from(selectedH3Indexes));
+    const polygonId = polygons.find(p => p.allH3Indexes.includes(hexagonId))?.id || 0;
+    
+    const newScheduledHexagon: ScheduledHexagon = {
+      hexagonId,
+      hexagonNumber,
+      timeSlot,
+      polygonId,
+      customDuration: duration,
+    };
+
+    setScheduledHexagons(prev => [...prev, newScheduledHexagon]);
+    setSelectedHexagonsForSchedule(prev => new Set([...prev, hexagonId]));
+  };
+
+  // Get all available hexagons for scheduling
+  const availableHexagons = Array.from(selectedH3Indexes);
+
 
   return (
-    <SidebarProvider>
-      <Sidebar>
-        <SidebarHeader>
+    <ResizableSidebarProvider defaultWidth={320} minWidth={200} maxWidth={500}>
+      <ResizableSidebar>
+        <ResizableSidebarHeader>
           <div className="flex items-center gap-3 p-2">
             <Layers className="h-8 w-8 text-primary" />
             <h1 className="font-headline text-xl font-semibold">GeoHex Uberizer</h1>
           </div>
-        </SidebarHeader>
-        <SidebarContent>
-          <PolygonForm onSubmit={handlePolygonSubmit} />
-          <PolygonList
-            polygons={polygons}
-            selectedH3Indexes={selectedH3Indexes}
-            onSelectionChange={handleHexagonSelectionChange}
-            onSelectAll={handleSelectAllInPolygon}
-            onHexHover={handleHexHover}
-            onRemovePolygon={handleRemovePolygon}
-            onClearAll={handleClearAll}
-          />
-        </SidebarContent>
-      </Sidebar>
-      <SidebarInset>
+        </ResizableSidebarHeader>
+        <ResizableSidebarContent>
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <TabsList className="grid w-full grid-cols-2 mx-2 mt-2">
+              <TabsTrigger value="input">Input</TabsTrigger>
+              <TabsTrigger value="schedules" disabled={availableHexagons.length === 0}>
+                Schedule Routes ({Math.max(0, availableHexagons.length - scheduledHexagons.length)})
+              </TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="input" className="mt-4">
+              <PolygonForm onSubmit={handlePolygonSubmit} />
+              <PolygonList
+                polygons={polygons}
+                selectedH3Indexes={selectedH3Indexes}
+                onSelectionChange={handleHexagonSelectionChange}
+                onSelectAll={handleSelectAllInPolygon}
+                onHexHover={handleHexHover}
+                onRemovePolygon={handleRemovePolygon}
+                onClearAll={handleClearAll}
+              />
+            </TabsContent>
+            
+            <TabsContent value="schedules" className="mt-4">
+              <ScheduleTab
+                schedules={schedules}
+                availableHexagons={availableHexagons}
+                onScheduleCreate={handleScheduleCreate}
+                onScheduleUpdate={handleScheduleUpdate}
+                onScheduleDelete={handleScheduleDelete}
+                onScheduleDuplicate={handleScheduleDuplicate}
+                onHexagonSelect={handleHexagonSelect}
+                onHexagonDeselect={handleHexagonDeselect}
+                onHexagonSelectWithCustomTime={handleHexagonSelectWithCustomTime}
+                selectedHexagons={selectedHexagonsForSchedule}
+                scheduledHexagons={scheduledHexagons}
+                onRoutesLoaded={handleRoutesLoaded}
+              />
+            </TabsContent>
+          </Tabs>
+        </ResizableSidebarContent>
+      </ResizableSidebar>
+      <ResizableSidebarInset>
         <main className="relative h-screen w-full">
           <div className="absolute left-4 top-4 z-10">
-            <SidebarTrigger />
+            <ResizableSidebarTrigger />
           </div>
           <MapComponent
             key={mapKey}
             polygons={polygons.map((p) => p.leafletPolygon)}
             hexagons={renderedHexagons}
             hoveredHexIndex={hoveredHexIndex}
+            scheduledHexagons={scheduledHexagons}
+            selectedHexagonsForSchedule={selectedHexagonsForSchedule}
+            onHexagonClick={activeTab === 'schedules' ? handleMapHexagonClick : undefined}
           />
         </main>
-      </SidebarInset>
-    </SidebarProvider>
+      </ResizableSidebarInset>
+    </ResizableSidebarProvider>
   );
 }

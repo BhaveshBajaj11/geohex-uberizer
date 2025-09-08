@@ -15,6 +15,9 @@ type MapComponentProps = {
   polygons: LatLngLiteral[][];
   hexagons: Hexagon[];
   hoveredHexIndex: string | null;
+  scheduledHexagons?: { hexagonId: string; hexagonNumber: number; timeSlot: { start: string; end: string } }[];
+  selectedHexagonsForSchedule?: Set<string>;
+  onHexagonClick?: (hexagonId: string) => void;
 };
 
 const getCenter = (boundary: LatLngLiteral[]): LatLngExpression => {
@@ -27,7 +30,14 @@ const getCenter = (boundary: LatLngLiteral[]): LatLngExpression => {
   return [(minLat + maxLat) / 2, (minLng + maxLng) / 2];
 };
 
-export default function MapComponent({polygons, hexagons, hoveredHexIndex}: MapComponentProps) {
+export default function MapComponent({
+  polygons, 
+  hexagons, 
+  hoveredHexIndex, 
+  scheduledHexagons = [], 
+  selectedHexagonsForSchedule = new Set(),
+  onHexagonClick
+}: MapComponentProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<L.Map | null>(null);
   const featureGroup = useRef<L.FeatureGroup | null>(null);
@@ -70,23 +80,72 @@ export default function MapComponent({polygons, hexagons, hoveredHexIndex}: MapC
 
     hexagons.forEach((hex) => {
       const isHovered = hex.index === hoveredHexIndex;
+      const isScheduled = scheduledHexagons.some(sh => sh.hexagonId === hex.index);
+      const isSelectedForSchedule = selectedHexagonsForSchedule.has(hex.index);
+      
+      // Determine hexagon color based on state
+      let hexColor = 'red';
+      let fillColor = 'red';
+      let fillOpacity = 0.2;
+      
+      if (isScheduled) {
+        hexColor = '#22c55e'; // Green for scheduled
+        fillColor = '#22c55e';
+        fillOpacity = 0.4;
+      } else if (isSelectedForSchedule) {
+        hexColor = '#3b82f6'; // Blue for selected
+        fillColor = '#3b82f6';
+        fillOpacity = 0.3;
+      } else if (isHovered) {
+        fillColor = highlightColor;
+        fillOpacity = 0.6;
+      }
+
       L.polygon(hex.boundary as LatLngExpression[], {
-        color: 'red',
+        color: hexColor,
         weight: 3,
         opacity: 0.8,
-        fillColor: isHovered ? highlightColor : 'red',
-        fillOpacity: isHovered ? 0.6 : 0.2,
+        fillColor: fillColor,
+        fillOpacity: fillOpacity,
       }).addTo(group);
 
       const center = getCenter(hex.boundary);
-      const numberIcon = L.divIcon({
-          className: 'hexagon-number-label',
-          html: `<div style="font-size: 12px; font-weight: bold; color: white; text-shadow: 0 0 5px black, 0 0 5px black;">${hex.number}</div>`,
-          iconSize: [24, 24],
-          iconAnchor: [12, 12]
-      });
+      
+      // Show numbers only for selected hexagons (when creating routes)
+      if (isSelectedForSchedule) {
+        // Get the selection order by finding the index in the scheduledHexagons array
+        const selectionOrder = scheduledHexagons.findIndex(sh => sh.hexagonId === hex.index) + 1;
+        
+        const numberIcon = L.divIcon({
+            className: 'hexagon-number-label',
+            html: `<div style="font-size: 12px; font-weight: bold; color: white; text-shadow: 0 0 5px black, 0 0 5px black;">${selectionOrder}</div>`,
+            iconSize: [24, 24],
+            iconAnchor: [12, 12]
+        });
 
-      L.marker(center, { icon: numberIcon }).addTo(group);
+        const marker = L.marker(center, { icon: numberIcon }).addTo(group);
+        
+        // Add click handler if provided
+        if (onHexagonClick) {
+          marker.on('click', () => {
+            onHexagonClick(hex.index);
+          });
+        }
+      } else {
+        // When not showing numbers, still add a clickable marker for interaction
+        if (onHexagonClick) {
+          const invisibleIcon = L.divIcon({
+            className: 'invisible-marker',
+            html: '<div></div>',
+            iconSize: [24, 24],
+            iconAnchor: [12, 12]
+          });
+          const marker = L.marker(center, { icon: invisibleIcon }).addTo(group);
+          marker.on('click', () => {
+            onHexagonClick(hex.index);
+          });
+        }
+      }
     });
 
     if (group.getLayers().length > 0) {
@@ -97,7 +156,7 @@ export default function MapComponent({polygons, hexagons, hoveredHexIndex}: MapC
     } else {
         map.setView([40.7128, -74.006], 2);
     }
-  }, [polygons, hexagons, hoveredHexIndex]);
+  }, [polygons, hexagons, hoveredHexIndex, scheduledHexagons, selectedHexagonsForSchedule, onHexagonClick]);
 
   return <div ref={mapRef} className="h-full w-full" />;
 }
