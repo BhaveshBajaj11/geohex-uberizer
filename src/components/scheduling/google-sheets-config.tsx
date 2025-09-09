@@ -1,85 +1,85 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Download, Upload, Link as LinkIcon } from 'lucide-react';
-import { fetchRoutesFromGoogleSheet, saveRouteToGoogleSheet, testGoogleSheetsWebhook } from '@/app/actions';
+import { Loader2, Upload, Link as LinkIcon } from 'lucide-react';
+import { saveRouteToGoogleSheet, fetchRoutesFromGoogleSheet } from '@/app/actions';
 import type { HexagonSchedule } from '@/types/scheduling';
 
 interface GoogleSheetsConfigProps {
-  onRoutesLoaded: (routes: HexagonSchedule[]) => void;
   onRouteSave: (route: HexagonSchedule) => Promise<void>;
+  onRoutesLoaded: (routes: HexagonSchedule[]) => void;
   currentRoutes: HexagonSchedule[];
+  selectedTerminalId?: string;
 }
 
 export default function GoogleSheetsConfig({ 
-  onRoutesLoaded, 
   onRouteSave, 
-  currentRoutes 
+  onRoutesLoaded,
+  currentRoutes,
+  selectedTerminalId
 }: GoogleSheetsConfigProps) {
-  const [sheetUrl, setSheetUrl] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [isTesting, setIsTesting] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const hasLoadedRoutes = useRef(false);
   const { toast } = useToast();
 
-  const handleLoadRoutes = async () => {
-    if (!sheetUrl.trim()) {
-      toast({
-        variant: 'destructive',
-        title: 'Error',
-        description: 'Please enter a Google Sheets URL first.',
-      });
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      const result = await fetchRoutesFromGoogleSheet(sheetUrl);
-      
-      if (result.success && result.data) {
-        onRoutesLoaded(result.data);
-        toast({
-          title: 'Routes Loaded',
-          description: `Successfully loaded ${result.data.length} routes from Google Sheets. Make sure you have the corresponding polygons loaded to edit hexagons.`,
-        });
-      } else {
-        toast({
-          variant: 'destructive',
-          title: 'Failed to load routes',
-          description: result.error || 'An unknown error occurred.',
-        });
+  // Automatically load routes when terminal ID is available
+  useEffect(() => {
+    const loadRoutes = async () => {
+      if (!selectedTerminalId) {
+        return;
       }
-    } catch (error) {
-      toast({
-        variant: 'destructive',
-        title: 'Error',
-        description: 'Failed to load routes from Google Sheets.',
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
+
+      // Only load if we haven't loaded routes yet and don't already have routes
+      if (hasLoadedRoutes.current || currentRoutes.length > 0) {
+        return;
+      }
+
+      setIsLoading(true);
+      try {
+        const result = await fetchRoutesFromGoogleSheet(selectedTerminalId);
+        
+        if (result.success && result.data) {
+          onRoutesLoaded(result.data);
+          hasLoadedRoutes.current = true;
+          toast({
+            title: 'Routes Loaded',
+            description: `Successfully loaded ${result.data.length} routes for Terminal ID "${selectedTerminalId}".`,
+          });
+        } else {
+          console.error('Failed to load routes:', result.error);
+          // Don't show error toast for automatic loading to avoid spam
+        }
+      } catch (error) {
+        console.error('Error loading routes:', error);
+        // Don't show error toast for automatic loading to avoid spam
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadRoutes();
+  }, [selectedTerminalId, onRoutesLoaded, toast, currentRoutes.length]);
+
 
   const handleSaveAllRoutes = async () => {
-    if (!sheetUrl.trim()) {
-      toast({
-        variant: 'destructive',
-        title: 'Error',
-        description: 'Please enter a Google Sheets URL first.',
-      });
-      return;
-    }
-
     if (currentRoutes.length === 0) {
       toast({
         variant: 'destructive',
         title: 'No routes to save',
         description: 'Create some routes first before saving to Google Sheets.',
+      });
+      return;
+    }
+
+    if (isSaving) {
+      toast({
+        variant: 'destructive',
+        title: 'Save in progress',
+        description: 'Please wait for the current save operation to complete.',
       });
       return;
     }
@@ -91,7 +91,7 @@ export default function GoogleSheetsConfig({
       
       // Process each route and write to Google Sheets
       for (const route of currentRoutes) {
-        const result = await saveRouteToGoogleSheet(sheetUrl, route);
+        const result = await saveRouteToGoogleSheet(route);
         
         if (result.success) {
           successCount++;
@@ -124,33 +124,6 @@ export default function GoogleSheetsConfig({
     }
   };
 
-  const handleTestWebhook = async () => {
-    setIsTesting(true);
-    try {
-      const result = await testGoogleSheetsWebhook(sheetUrl);
-      
-      if (result.success) {
-        toast({
-          title: 'Webhook Test Successful',
-          description: result.message || 'Google Apps Script is working correctly.',
-        });
-      } else {
-        toast({
-          variant: 'destructive',
-          title: 'Webhook Test Failed',
-          description: result.error || 'Failed to connect to Google Apps Script.',
-        });
-      }
-    } catch (error) {
-      toast({
-        variant: 'destructive',
-        title: 'Test Error',
-        description: 'Failed to test webhook connection.',
-      });
-    } finally {
-      setIsTesting(false);
-    }
-  };
 
   return (
     <Card className="mb-4">
@@ -159,65 +132,25 @@ export default function GoogleSheetsConfig({
           <LinkIcon className="h-5 w-5" />
           Google Sheets Integration
         </CardTitle>
-        <CardDescription>
-          Connect to Google Sheets to load existing routes or save your current routes directly to the sheet.
-        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="sheet-url">Google Sheets URL</Label>
-          <Input
-            id="sheet-url"
-            type="url"
-            placeholder="https://docs.google.com/spreadsheets/d/..."
-            value={sheetUrl}
-            onChange={(e) => setSheetUrl(e.target.value)}
-          />
-          <p className="text-sm text-muted-foreground">
-            Make sure the sheet has the required columns: Terminal ID, Route Name, hexagon_id, Start Time, End Time, Ordering
-          </p>
-          <p className="text-xs text-muted-foreground">
-            💡 Tip: Load your polygons first, then load routes to enable hexagon editing
-          </p>
-          <p className="text-xs text-green-600">
-            ✅ Google Apps Script configured - direct writing enabled
-          </p>
-        </div>
-        
-        <div className="flex gap-2">
-          <Button
-            onClick={handleLoadRoutes}
-            disabled={isLoading || !sheetUrl.trim()}
-            variant="outline"
-            className="flex-1"
-          >
-            {isLoading ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Download className="h-4 w-4 mr-2" />
-            )}
-            Load Routes
-          </Button>
-          
-          <Button
-            onClick={handleTestWebhook}
-            disabled={isTesting || !sheetUrl.trim()}
-            variant="outline"
-            size="sm"
-          >
-            {isTesting ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <LinkIcon className="h-4 w-4 mr-2" />
-            )}
-            Test
-          </Button>
-        </div>
+        {selectedTerminalId && (
+          <div className="text-sm text-muted-foreground">
+            <span className="font-medium">Terminal ID:</span> {selectedTerminalId}
+          </div>
+        )}
+
+        {isLoading && (
+          <div className="flex items-center justify-center p-4">
+            <Loader2 className="animate-spin mr-2" />
+            <span>Loading routes from Google Sheets...</span>
+          </div>
+        )}
         
         <div className="flex gap-2">
           <Button
             onClick={handleSaveAllRoutes}
-            disabled={isSaving || !sheetUrl.trim() || currentRoutes.length === 0}
+            disabled={isSaving || currentRoutes.length === 0}
             className="flex-1"
           >
             {isSaving ? (

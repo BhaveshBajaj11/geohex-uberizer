@@ -22,6 +22,7 @@ import ScheduleTab from '@/components/scheduling/schedule-tab';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { HexagonSchedule, ScheduledHexagon } from '@/types/scheduling';
 import { generateTimeSlots, getNextAvailableTimeSlot, generateScheduleId, getHexagonNumber, createCustomTimeSlot } from '@/lib/scheduling-utils';
+import { getHexagonsForTerminal } from './actions';
 
 const MapComponent = dynamic(() => import('@/components/map-component'), {
   ssr: false,
@@ -56,6 +57,9 @@ export default function Home() {
   const [selectedHexagonsForSchedule, setSelectedHexagonsForSchedule] = useState<Set<string>>(new Set());
   const [scheduledHexagons, setScheduledHexagons] = useState<ScheduledHexagon[]>([]);
   const [activeTab, setActiveTab] = useState<string>('input');
+  const [scheduleView, setScheduleView] = useState<'list' | 'create' | 'edit'>('list');
+  const [selectedTerminalId, setSelectedTerminalId] = useState<string>('');
+  const [terminalHexagons, setTerminalHexagons] = useState<string[]>([]);
 
   useEffect(() => {
     // Update map hexagons when selection changes
@@ -70,7 +74,7 @@ export default function Home() {
     setRenderedHexagons(selectedHexagons);
   }, [selectedH3Indexes]);
 
-  const handlePolygonSubmit = (data: {wkts: string[]; resolution: number}) => {
+  const handlePolygonSubmit = (data: {wkts: string[]; resolution: number; terminalId?: string}) => {
     let totalHexagons = 0;
     const newPolygonsData: PolygonData[] = [];
     const newH3Indexes: string[] = [];
@@ -158,6 +162,11 @@ export default function Home() {
 
       setMapKey(Date.now());
 
+      // Set the terminal ID if provided
+      if (data.terminalId) {
+        setSelectedTerminalId(data.terminalId);
+      }
+
       toast({
         title: `${newPolygonsData.length} Polygon(s) Added!`,
         description: `Generated ${totalHexagons} H3 hexagons at resolution ${data.resolution}. Previous schedules have been cleared.`,
@@ -238,10 +247,11 @@ export default function Home() {
   };
 
   // Scheduling functions
-  const handleScheduleCreate = (name: string, hexagons: ScheduledHexagon[]) => {
+  const handleScheduleCreate = (name: string, hexagons: ScheduledHexagon[], terminalId?: string) => {
     const newSchedule: HexagonSchedule = {
       id: generateScheduleId(),
       name,
+      terminalId: terminalId || selectedTerminalId || '',
       hexagons,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -310,6 +320,20 @@ export default function Home() {
     }
   };
 
+  const handleClearSchedulingState = () => {
+    setSelectedHexagonsForSchedule(new Set());
+    setScheduledHexagons([]);
+  };
+
+  const handleScheduleViewChange = (view: 'list' | 'create' | 'edit') => {
+    setScheduleView(view);
+  };
+
+  const handleLocalScheduledHexagonsChange = (hexagons: ScheduledHexagon[]) => {
+    // Update global state with local scheduled hexagons for new schedules
+    setScheduledHexagons(hexagons);
+  };
+
   const handleRoutesLoaded = (loadedRoutes: HexagonSchedule[]) => {
     // Merge loaded routes with existing schedules
     // Avoid duplicates by checking IDs
@@ -335,6 +359,32 @@ export default function Home() {
       description: `Loaded ${loadedRoutes.length} routes from Google Sheets.`,
     });
   };
+
+
+  // Load hexagons for the selected terminal
+  useEffect(() => {
+    const loadTerminalHexagons = async () => {
+      if (!selectedTerminalId) {
+        setTerminalHexagons([]);
+        return;
+      }
+
+      try {
+        const result = await getHexagonsForTerminal(selectedTerminalId);
+        if (result.success && result.data) {
+          setTerminalHexagons(result.data);
+        } else {
+          console.error('Failed to load hexagons for terminal:', result.error);
+          setTerminalHexagons([]);
+        }
+      } catch (error) {
+        console.error('Error loading hexagons for terminal:', error);
+        setTerminalHexagons([]);
+      }
+    };
+
+    loadTerminalHexagons();
+  }, [selectedTerminalId]);
 
   const handleHexagonSelect = (hexagonId: string) => {
     const allTimeSlots = generateTimeSlots();
@@ -400,7 +450,9 @@ export default function Home() {
   };
 
   // Get all available hexagons for scheduling
-  const availableHexagons = Array.from(selectedH3Indexes);
+  // Include both current session hexagons and terminal hexagons
+  const sessionHexagons = Array.from(selectedH3Indexes);
+  const availableHexagons = Array.from(new Set([...sessionHexagons, ...terminalHexagons]));
 
 
   return (
@@ -448,6 +500,11 @@ export default function Home() {
                 selectedHexagons={selectedHexagonsForSchedule}
                 scheduledHexagons={scheduledHexagons}
                 onRoutesLoaded={handleRoutesLoaded}
+                onViewChange={handleScheduleViewChange}
+                onLocalScheduledHexagonsChange={handleLocalScheduledHexagonsChange}
+                selectedTerminalId={selectedTerminalId}
+                onClearSchedulingState={handleClearSchedulingState}
+                onHexagonVisualSelect={(hexagonId) => setSelectedHexagonsForSchedule(prev => new Set([...prev, hexagonId]))}
               />
             </TabsContent>
           </Tabs>
@@ -465,7 +522,7 @@ export default function Home() {
             hoveredHexIndex={hoveredHexIndex}
             scheduledHexagons={scheduledHexagons}
             selectedHexagonsForSchedule={selectedHexagonsForSchedule}
-            onHexagonClick={activeTab === 'schedules' ? handleMapHexagonClick : undefined}
+            onHexagonClick={activeTab === 'schedules' && (scheduleView === 'create' || scheduleView === 'edit') ? handleMapHexagonClick : undefined}
           />
         </main>
       </ResizableSidebarInset>

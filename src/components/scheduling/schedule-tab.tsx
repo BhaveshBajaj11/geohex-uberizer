@@ -11,7 +11,7 @@ import { Plus, ArrowLeft } from 'lucide-react';
 interface ScheduleTabProps {
   schedules: HexagonSchedule[];
   availableHexagons: string[];
-  onScheduleCreate: (name: string, hexagons: ScheduledHexagon[]) => void;
+  onScheduleCreate: (name: string, hexagons: ScheduledHexagon[], terminalId?: string) => void;
   onScheduleUpdate: (id: string, updates: Partial<HexagonSchedule>) => void;
   onScheduleDelete: (id: string) => void;
   onScheduleDuplicate: (id: string) => void;
@@ -21,6 +21,11 @@ interface ScheduleTabProps {
   selectedHexagons: Set<string>;
   scheduledHexagons: ScheduledHexagon[];
   onRoutesLoaded?: (routes: HexagonSchedule[]) => void;
+  onViewChange?: (view: 'list' | 'create' | 'edit') => void;
+  onLocalScheduledHexagonsChange?: (hexagons: ScheduledHexagon[]) => void;
+  selectedTerminalId?: string;
+  onClearSchedulingState?: () => void;
+  onHexagonVisualSelect?: (hexagonId: string) => void;
 }
 
 export default function ScheduleTab({
@@ -36,6 +41,11 @@ export default function ScheduleTab({
   selectedHexagons,
   scheduledHexagons,
   onRoutesLoaded,
+  onViewChange,
+  onLocalScheduledHexagonsChange,
+  selectedTerminalId,
+  onClearSchedulingState,
+  onHexagonVisualSelect,
 }: ScheduleTabProps) {
   const [currentView, setCurrentView] = useState<'list' | 'create' | 'edit'>('list');
   const [editingSchedule, setEditingSchedule] = useState<HexagonSchedule | null>(null);
@@ -43,23 +53,44 @@ export default function ScheduleTab({
   const handleCreateNew = () => {
     setCurrentView('create');
     setEditingSchedule(null);
+    // Clear the global scheduling state when creating a new schedule
+    // This ensures we start with a clean slate
+    if (onClearSchedulingState) {
+      onClearSchedulingState();
+    }
+    // Notify parent about view change
+    if (onViewChange) {
+      onViewChange('create');
+    }
   };
 
   const handleEdit = (schedule: HexagonSchedule) => {
     setEditingSchedule(schedule);
     setCurrentView('edit');
+    // Clear current visual selections and global scheduled state; editor will rehydrate
+    if (onClearSchedulingState) {
+      onClearSchedulingState();
+    }
+    // Notify parent about view change
+    if (onViewChange) {
+      onViewChange('edit');
+    }
   };
 
   const handleBackToList = () => {
     setCurrentView('list');
     setEditingSchedule(null);
+    // Notify parent about view change
+    if (onViewChange) {
+      onViewChange('list');
+    }
   };
 
   const handleSave = (name: string, hexagons: ScheduledHexagon[]) => {
     if (editingSchedule) {
       onScheduleUpdate(editingSchedule.id, { name, hexagons, updatedAt: new Date() });
     } else {
-      onScheduleCreate(name, hexagons);
+      onScheduleCreate(name, hexagons, selectedTerminalId);
     }
     handleBackToList();
   };
@@ -89,9 +120,10 @@ export default function ScheduleTab({
       {currentView === 'list' && (
         <>
           <GoogleSheetsConfig
-            onRoutesLoaded={handleRoutesLoaded}
             onRouteSave={handleRouteSave}
+            onRoutesLoaded={handleRoutesLoaded}
             currentRoutes={schedules}
+            selectedTerminalId={selectedTerminalId}
           />
           <div className="flex items-center justify-between px-2">
             <h3 className="text-lg font-semibold">Schedule Routes</h3>
@@ -124,12 +156,14 @@ export default function ScheduleTab({
             schedule={editingSchedule}
             availableHexagons={availableHexagons}
             selectedHexagons={selectedHexagons}
-            scheduledHexagons={scheduledHexagons}
+            scheduledHexagons={editingSchedule ? editingSchedule.hexagons : []}
             onSave={handleSave}
             onCancel={handleBackToList}
             onHexagonSelect={onHexagonSelect}
             onHexagonDeselect={onHexagonDeselect}
             onHexagonSelectWithCustomTime={onHexagonSelectWithCustomTime}
+            onLocalScheduledHexagonsChange={onLocalScheduledHexagonsChange}
+            onHexagonVisualSelect={onHexagonVisualSelect}
           />
         </>
       )}

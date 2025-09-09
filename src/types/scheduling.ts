@@ -20,6 +20,7 @@ export interface TimeValidationResult {
 export interface HexagonSchedule {
   id: string;
   name: string;
+  terminalId: string;
   hexagons: ScheduledHexagon[];
   createdAt: Date;
   updatedAt: Date;

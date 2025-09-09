@@ -4,6 +4,10 @@
 import Papa from 'papaparse';
 import type { HexagonSchedule, ScheduledHexagon } from '@/types/scheduling';
 
+// Hardcoded Google Sheets URLs
+const POLYGON_SHEET_URL = 'https://docs.google.com/spreadsheets/d/100PpgFmO116AwqEZduLG_94U7JBUPa1_wvd3keZpL2A/edit?gid=1047790723#gid=1047790723';
+const SCHEDULE_ROUTES_SHEET_URL = 'https://docs.google.com/spreadsheets/d/100PpgFmO116AwqEZduLG_94U7JBUPa1_wvd3keZpL2A/edit?gid=1174409#gid=1174409';
+
 function getSheetIdAndGid(url: string): {sheetId: string | null; gid: string | null} {
   const sheetIdRegex = /spreadsheets\/d\/([a-zA-Z0-9-_]+)/;
   const gidRegex = /gid=([0-9]+)/;
@@ -17,15 +21,12 @@ function getSheetIdAndGid(url: string): {sheetId: string | null; gid: string | n
   };
 }
 
-export async function fetchGoogleSheetData(url: string): Promise<{
+export async function fetchGoogleSheetData(): Promise<{
   success: boolean;
   data?: { headers: string[]; rows: string[][] };
   error?: string;
 }> {
-  if (!url || !url.includes('docs.google.com/spreadsheets')) {
-    return { success: false, error: 'Please enter a valid Google Sheet URL.' };
-  }
-
+  const url = POLYGON_SHEET_URL;
   const { sheetId, gid } = getSheetIdAndGid(url);
 
   if (!sheetId) {
@@ -94,7 +95,7 @@ export interface RouteSheetData {
 // Data transformation functions
 export async function scheduleToSheetRows(schedule: HexagonSchedule): Promise<RouteSheetRow[]> {
   return schedule.hexagons.map((hexagon, index) => ({
-    'Terminal ID': schedule.id,
+    'Terminal ID': schedule.terminalId,
     'Route Name': schedule.name,
     'hexagon_id': hexagon.hexagonId,
     'Start Time': hexagon.timeSlot.start,
@@ -111,8 +112,9 @@ export async function sheetRowsToSchedules(rows: RouteSheetRow[]): Promise<Hexag
     
     if (!scheduleMap.has(key)) {
       scheduleMap.set(key, {
-        id: row['Terminal ID'],
+        id: `${row['Terminal ID']}-${row['Route Name']}`,
         name: row['Route Name'],
+        terminalId: row['Terminal ID'],
         hexagons: [],
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -152,12 +154,61 @@ export async function sheetRowsToSchedules(rows: RouteSheetRow[]): Promise<Hexag
 }
 
 // Route-specific Google Sheets actions
-export async function fetchRoutesFromGoogleSheet(url: string): Promise<{
+export async function fetchRoutesFromGoogleSheet(terminalId?: string): Promise<{
   success: boolean;
   data?: HexagonSchedule[];
   error?: string;
 }> {
-  const result = await fetchGoogleSheetData(url);
+  const url = SCHEDULE_ROUTES_SHEET_URL;
+  const { sheetId, gid } = getSheetIdAndGid(url);
+
+  if (!sheetId) {
+    return { success: false, error: 'Could not parse Sheet ID from the URL.' };
+  }
+
+  // If GID is not in the original URL, it defaults to the first sheet (gid=0)
+  const gidValue = gid ?? '0';
+  const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gidValue}`;
+  
+  let result;
+  try {
+    const response = await fetch(csvUrl);
+    if (!response.ok) {
+      if (response.status === 400) {
+        throw new Error('Failed to fetch sheet. This might be a private sheet or an invalid URL. Please ensure "Anyone with the link can view".');
+      }
+      throw new Error(`Failed to fetch sheet. Status: ${response.status}`);
+    }
+    const text = await response.text();
+    
+    // Check for HTML response which indicates an error page (e.g. login required)
+    if (text.trim().startsWith('<!DOCTYPE html>')) {
+        throw new Error('Failed to fetch sheet data. The URL may be for a private sheet. Please ensure "Anyone with the link can view".');
+    }
+
+    const parseResult = Papa.parse<string[]>(text, {
+        skipEmptyLines: true,
+    });
+    
+    if (parseResult.errors.length > 0) {
+        console.error('Parsing errors:', parseResult.errors);
+        throw new Error('Error parsing CSV data from the sheet.');
+    }
+
+    if (parseResult.data.length < 1) {
+        return { success: false, error: 'Sheet appears to be empty or in an invalid format.' };
+    }
+    
+    const headers = parseResult.data[0];
+    const rows = parseResult.data.slice(1);
+
+    result = { success: true, data: { headers, rows } };
+
+  } catch (error) {
+    console.error('Error fetching Google Sheet:', error);
+    const message = error instanceof Error ? error.message : 'An unknown error occurred.';
+    result = { success: false, error: message };
+  }
   
   if (!result.success || !result.data) {
     return { success: false, error: result.error };
@@ -199,7 +250,17 @@ export async function fetchRoutesFromGoogleSheet(url: string): Promise<{
     // Convert to schedules
     const schedules = await sheetRowsToSchedules(routeRows);
     
-    return { success: true, data: schedules };
+    console.log('Debug - Terminal ID being filtered:', terminalId);
+    console.log('Debug - All schedules found:', schedules.map(s => ({ id: s.id, terminalId: s.terminalId, name: s.name })));
+    
+    // Filter by terminal ID if provided
+    const filteredSchedules = terminalId 
+      ? schedules.filter(schedule => schedule.terminalId === terminalId)
+      : schedules;
+    
+    console.log('Debug - Filtered schedules:', filteredSchedules.map(s => ({ id: s.id, terminalId: s.terminalId, name: s.name })));
+    
+    return { success: true, data: filteredSchedules };
     
   } catch (error) {
     console.error('Error processing route data:', error);
@@ -208,13 +269,156 @@ export async function fetchRoutesFromGoogleSheet(url: string): Promise<{
   }
 }
 
+// Function to get available terminal IDs from routes
+export async function getAvailableTerminalIds(): Promise<{
+  success: boolean;
+  data?: string[];
+  error?: string;
+}> {
+  const url = SCHEDULE_ROUTES_SHEET_URL;
+  const { sheetId, gid } = getSheetIdAndGid(url);
+
+  if (!sheetId) {
+    return { success: false, error: 'Could not parse Sheet ID from the URL.' };
+  }
+
+  const gidValue = gid ?? '0';
+  const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gidValue}`;
+  
+  try {
+    const response = await fetch(csvUrl);
+    if (!response.ok) {
+      if (response.status === 400) {
+        throw new Error('Failed to fetch sheet. This might be a private sheet or an invalid URL. Please ensure "Anyone with the link can view".');
+      }
+      throw new Error(`Failed to fetch sheet. Status: ${response.status}`);
+    }
+    const text = await response.text();
+    
+    if (text.trim().startsWith('<!DOCTYPE html>')) {
+        throw new Error('Failed to fetch sheet data. The URL may be for a private sheet. Please ensure "Anyone with the link can view".');
+    }
+
+    const parseResult = Papa.parse<string[]>(text, {
+        skipEmptyLines: true,
+    });
+    
+    if (parseResult.errors.length > 0) {
+        console.error('Parsing errors:', parseResult.errors);
+        throw new Error('Error parsing CSV data from the sheet.');
+    }
+
+    if (parseResult.data.length < 1) {
+        return { success: false, error: 'Sheet appears to be empty or in an invalid format.' };
+    }
+    
+    const headers = parseResult.data[0];
+    const rows = parseResult.data.slice(1);
+
+    // Find Terminal ID column index
+    const terminalIdIndex = headers.indexOf('Terminal ID');
+    if (terminalIdIndex === -1) {
+      return { success: false, error: 'Terminal ID column not found in the sheet.' };
+    }
+
+    // Extract unique terminal IDs
+    const terminalIds = new Set<string>();
+    rows.forEach(row => {
+      const terminalId = row[terminalIdIndex];
+      if (terminalId && terminalId.trim()) {
+        terminalIds.add(terminalId.trim());
+      }
+    });
+
+    return { success: true, data: Array.from(terminalIds).sort() };
+    
+  } catch (error) {
+    console.error('Error fetching terminal IDs:', error);
+    const message = error instanceof Error ? error.message : 'An unknown error occurred while fetching terminal IDs.';
+    return { success: false, error: message };
+  }
+}
+
+// Function to get all hexagon IDs for a specific terminal
+export async function getHexagonsForTerminal(terminalId: string): Promise<{
+  success: boolean;
+  data?: string[];
+  error?: string;
+}> {
+  const url = SCHEDULE_ROUTES_SHEET_URL;
+  const { sheetId, gid } = getSheetIdAndGid(url);
+
+  if (!sheetId) {
+    return { success: false, error: 'Could not parse Sheet ID from the URL.' };
+  }
+
+  const gidValue = gid ?? '0';
+  const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gidValue}`;
+  
+  try {
+    const response = await fetch(csvUrl);
+    if (!response.ok) {
+      if (response.status === 400) {
+        throw new Error('Failed to fetch sheet. This might be a private sheet or an invalid URL. Please ensure "Anyone with the link can view".');
+      }
+      throw new Error(`Failed to fetch sheet. Status: ${response.status}`);
+    }
+    const text = await response.text();
+    
+    if (text.trim().startsWith('<!DOCTYPE html>')) {
+        throw new Error('Failed to fetch sheet data. The URL may be for a private sheet. Please ensure "Anyone with the link can view".');
+    }
+
+    const parseResult = Papa.parse<string[]>(text, {
+        skipEmptyLines: true,
+    });
+    
+    if (parseResult.errors.length > 0) {
+        console.error('Parsing errors:', parseResult.errors);
+        throw new Error('Error parsing CSV data from the sheet.');
+    }
+
+    if (parseResult.data.length < 1) {
+        return { success: false, error: 'Sheet appears to be empty or in an invalid format.' };
+    }
+    
+    const headers = parseResult.data[0];
+    const rows = parseResult.data.slice(1);
+
+    // Find column indices
+    const terminalIdIndex = headers.indexOf('Terminal ID');
+    const hexagonIdIndex = headers.indexOf('hexagon_id');
+    
+    if (terminalIdIndex === -1 || hexagonIdIndex === -1) {
+      return { success: false, error: 'Required columns not found in the sheet.' };
+    }
+
+    // Extract unique hexagon IDs for the specified terminal
+    const hexagonIds = new Set<string>();
+    rows.forEach(row => {
+      const rowTerminalId = row[terminalIdIndex];
+      const hexagonId = row[hexagonIdIndex];
+      if (rowTerminalId === terminalId && hexagonId && hexagonId.trim()) {
+        hexagonIds.add(hexagonId.trim());
+      }
+    });
+
+    return { success: true, data: Array.from(hexagonIds) };
+    
+  } catch (error) {
+    console.error('Error fetching hexagons for terminal:', error);
+    const message = error instanceof Error ? error.message : 'An unknown error occurred while fetching hexagons for terminal.';
+    return { success: false, error: message };
+  }
+}
+
 // Test function to check if the webhook is working
-export async function testGoogleSheetsWebhook(url: string): Promise<{
+export async function testGoogleSheetsWebhook(): Promise<{
   success: boolean;
   error?: string;
   message?: string;
 }> {
-  const webhookUrl = `https://script.google.com/macros/s/AKfycbwINh9HNnWRvc_DTcCP5X1X87ex1MxwxCoe6jqXNANqqECC9LPRnbic090-98MBqbW-/exec`;
+  const webhookUrl = `https://script.google.com/macros/s/AKfycbw6KiuiyBwM21c9K2I-eC4fVu62i29nsXPR074UdIWB7rxHERm9-G9QwD4kb8BVuSp_/exec`;
   
   try {
     const response = await fetch(webhookUrl, {
@@ -233,16 +437,13 @@ export async function testGoogleSheetsWebhook(url: string): Promise<{
   }
 }
 
-export async function saveRouteToGoogleSheet(url: string, schedule: HexagonSchedule): Promise<{
+export async function saveRouteToGoogleSheet(schedule: HexagonSchedule): Promise<{
   success: boolean;
   error?: string;
   message?: string;
   values?: any[][];
 }> {
-  // Validate input
-  if (!url || !url.includes('docs.google.com/spreadsheets')) {
-    return { success: false, error: 'Please provide a valid Google Sheets URL.' };
-  }
+  const url = SCHEDULE_ROUTES_SHEET_URL;
 
   if (!schedule || !schedule.hexagons || schedule.hexagons.length === 0) {
     return { success: false, error: 'Schedule must contain at least one hexagon.' };
@@ -252,8 +453,8 @@ export async function saveRouteToGoogleSheet(url: string, schedule: HexagonSched
     return { success: false, error: 'Schedule must have a name.' };
   }
 
-  if (!schedule.id || schedule.id.trim() === '') {
-    return { success: false, error: 'Schedule must have a valid ID.' };
+  if (!schedule.terminalId || schedule.terminalId.trim() === '') {
+    return { success: false, error: 'Schedule must have a valid Terminal ID.' };
   }
   
   try {
@@ -308,6 +509,19 @@ export async function saveRouteToGoogleSheet(url: string, schedule: HexagonSched
               error: `Sheet is missing required columns: ${missingColumns.join(', ')}. Please add these columns to your sheet.` 
             };
           }
+          
+          // Check if this route already exists; we'll use this to decide between append vs replace
+          const terminalIdIndex = headers.indexOf('Terminal ID');
+          const routeNameIndex = headers.indexOf('Route Name');
+          
+          if (terminalIdIndex !== -1 && routeNameIndex !== -1) {
+            const existingRows = result.data.slice(1); // Skip header row
+            const routeExists = existingRows.some(row => 
+              row[terminalIdIndex] === schedule.terminalId && row[routeNameIndex] === schedule.name
+            );
+            // Store decision in a flag; if true, we'll send a replace action to the webhook below
+            (globalThis as any).__geohex_shouldReplaceRoute__ = routeExists;
+          }
         }
       }
       
@@ -329,15 +543,19 @@ export async function saveRouteToGoogleSheet(url: string, schedule: HexagonSched
       try {
         // Create a webhook URL for the Google Sheet
         // This would need to be set up using Google Apps Script
-        const webhookUrl = `https://script.google.com/macros/s/AKfycbwRL7UBg5hHcYBFXCpshqbWegixBebn3VYsc0KbKCg2ma_-vYkmOESyJanvQNT5bWHR/exec`;
+        const webhookUrl = `https://script.google.com/macros/s/AKfycbw6KiuiyBwM21c9K2I-eC4fVu62i29nsXPR074UdIWB7rxHERm9-G9QwD4kb8BVuSp_/exec`;
         
         // Prepare the data for the webhook
+        const shouldReplace = Boolean((globalThis as any).__geohex_shouldReplaceRoute__);
         const payload = {
-          action: 'append',
+          action: shouldReplace ? 'replace' : 'append',
           sheetId: sheetId,
           gid: gidValue,
           data: values,
-          headers: ['Terminal ID', 'Route Name', 'hexagon_id', 'Start Time', 'End Time', 'Ordering']
+          headers: ['Terminal ID', 'Route Name', 'hexagon_id', 'Start Time', 'End Time', 'Ordering'],
+          // Hints for the webhook to identify which rows to replace
+          matchColumns: ['Terminal ID', 'Route Name'],
+          matchValues: [schedule.terminalId, schedule.name]
         };
         
         // For now, we'll simulate the write operation
@@ -345,6 +563,7 @@ export async function saveRouteToGoogleSheet(url: string, schedule: HexagonSched
         console.log('Route data to save:', csvData);
         console.log('Route details:', {
           id: schedule.id,
+          terminalId: schedule.terminalId,
           name: schedule.name,
           hexagonCount: schedule.hexagons.length,
           url: url,
@@ -379,7 +598,9 @@ export async function saveRouteToGoogleSheet(url: string, schedule: HexagonSched
         if (result.success) {
           return { 
             success: true, 
-            message: 'Route data written to Google Sheets successfully.',
+            message: shouldReplace 
+              ? 'Route data updated in Google Sheets successfully.' 
+              : 'Route data written to Google Sheets successfully.',
             values: values
           };
         } else {

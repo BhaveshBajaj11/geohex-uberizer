@@ -4,7 +4,7 @@
 import GoogleSheetForm from './google-sheet-form';
 
 type PolygonFormProps = {
-  onSubmit: (values: { wkts: string[]; resolution: number }) => void;
+  onSubmit: (values: { wkts: string[]; resolution: number; terminalId?: string }) => void;
 };
 
 

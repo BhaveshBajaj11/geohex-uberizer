@@ -5,7 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import * as z from 'zod';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -29,9 +29,6 @@ import { useToast } from '@/hooks/use-toast';
 import { fetchGoogleSheetData } from '@/app/actions';
 
 const formSchema = z.object({
-  sheetUrl: z.string().url('Please enter a valid URL.'),
-  terminalIdColumn: z.string().optional(),
-  wktColumn: z.string().optional(),
   selectedTerminalId: z.string().optional(),
   resolution: z.coerce.number().min(0).max(15),
 });
@@ -42,7 +39,7 @@ type SheetData = {
 };
 
 type GoogleSheetFormProps = {
-  onSubmit: (values: { wkts: string[]; resolution: number }) => void;
+  onSubmit: (values: { wkts: string[]; resolution: number; terminalId?: string }) => void;
 };
 
 export default function GoogleSheetForm({ onSubmit }: GoogleSheetFormProps) {
@@ -53,21 +50,23 @@ export default function GoogleSheetForm({ onSubmit }: GoogleSheetFormProps) {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      sheetUrl: '',
       resolution: 10,
     },
   });
 
+  // Automatically fetch sheet data on component mount
+  useEffect(() => {
+    handleFetchSheet();
+  }, []);
+
   const { watch, formState } = form;
   const { isSubmitting } = formState;
 
-  const watchedTerminalIdColumn = watch('terminalIdColumn');
-  const watchedWktColumn = watch('wktColumn');
   const watchedSelectedTerminalId = watch('selectedTerminalId');
 
   const uniqueTerminalIds = useMemo(() => {
-    if (!sheetData || !watchedTerminalIdColumn) return [];
-    const terminalIdColumnIndex = sheetData.headers.indexOf(watchedTerminalIdColumn);
+    if (!sheetData) return [];
+    const terminalIdColumnIndex = sheetData.headers.indexOf('Terminal ID');
     if (terminalIdColumnIndex === -1) return [];
     
     const ids = new Set<string>();
@@ -78,35 +77,39 @@ export default function GoogleSheetForm({ onSubmit }: GoogleSheetFormProps) {
         }
     });
     return Array.from(ids).sort();
-  }, [sheetData, watchedTerminalIdColumn]);
+  }, [sheetData]);
 
 
   const handleFetchSheet = async () => {
-    const url = form.getValues('sheetUrl');
-    if (!url) {
-      form.setError('sheetUrl', {
-        type: 'manual',
-        message: 'Please enter a URL first.',
-      });
-      return;
-    }
-
     setIsFetching(true);
     setSheetData(null);
     form.reset({ 
         ...form.getValues(), 
-        terminalIdColumn: undefined,
-        wktColumn: undefined, 
         selectedTerminalId: undefined 
     });
 
-    const result = await fetchGoogleSheetData(url);
+    const result = await fetchGoogleSheetData();
 
     if (result.success && result.data) {
       setSheetData(result.data);
+      
+      // Check if required columns exist
+      const hasTerminalIdColumn = result.data.headers.includes('Terminal ID');
+      const hasPolygonColumn = result.data.headers.includes('Polygon');
+      
+      if (!hasTerminalIdColumn || !hasPolygonColumn) {
+        toast({
+          variant: 'destructive',
+          title: 'Missing Required Columns',
+          description: 'The sheet must contain "Terminal ID" and "Polygon" columns.',
+        });
+        setIsFetching(false);
+        return;
+      }
+      
       toast({
         title: 'Sheet Loaded',
-        description: `Found ${result.data.rows.length} rows. Please select the required columns.`,
+        description: `Found ${result.data.rows.length} rows. Please select a Terminal ID.`,
       });
     } else {
       toast({
@@ -114,28 +117,27 @@ export default function GoogleSheetForm({ onSubmit }: GoogleSheetFormProps) {
         title: 'Failed to fetch sheet',
         description: result.error,
       });
-      form.setError('sheetUrl', { type: 'manual', message: result.error });
     }
     setIsFetching(false);
   };
 
   const handleSubmit = () => {
-    const { terminalIdColumn, wktColumn, selectedTerminalId, resolution } = form.getValues();
-    if (!terminalIdColumn || !wktColumn || !selectedTerminalId || !sheetData) {
+    const { selectedTerminalId, resolution } = form.getValues();
+    if (!selectedTerminalId || !sheetData) {
       toast({
           variant: 'destructive',
           title: 'Incomplete selection',
-          description: 'Please select all required fields.',
+          description: 'Please select a Terminal ID.',
       });
       return;
     }
     
-    const terminalIdColIndex = sheetData.headers.indexOf(terminalIdColumn);
-    const wktColIndex = sheetData.headers.indexOf(wktColumn);
+    const terminalIdColIndex = sheetData.headers.indexOf('Terminal ID');
+    const polygonColIndex = sheetData.headers.indexOf('Polygon');
 
     const wkts = sheetData.rows
         .filter(row => row[terminalIdColIndex] === selectedTerminalId)
-        .map(row => row[wktColIndex])
+        .map(row => row[polygonColIndex])
         .filter((wkt): wkt is string => !!wkt);
 
 
@@ -148,7 +150,7 @@ export default function GoogleSheetForm({ onSubmit }: GoogleSheetFormProps) {
         return;
     }
     
-    onSubmit({ wkts, resolution });
+    onSubmit({ wkts, resolution, terminalId: selectedTerminalId });
   };
 
   return (
@@ -160,127 +162,41 @@ export default function GoogleSheetForm({ onSubmit }: GoogleSheetFormProps) {
         }}
         className="space-y-6 px-2"
       >
-        <FormField
-          control={form.control}
-          name="sheetUrl"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Google Sheet URL</FormLabel>
-              <FormControl>
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="https://docs.google.com/..."
-                    {...field}
-                  />
-                  <Button
-                    type="button"
-                    onClick={handleFetchSheet}
-                    disabled={isFetching}
-                  >
-                    {isFetching ? (
-                      <Loader2 className="animate-spin" />
-                    ) : (
-                      'Fetch'
-                    )}
-                  </Button>
-                </div>
-              </FormControl>
-              <FormDescription>
-                Paste the URL of a public Google Sheet. Make sure sharing is set to 'Anyone with the link can view'.
-              </FormDescription>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
+        {isFetching && (
+          <div className="flex items-center justify-center p-4">
+            <Loader2 className="animate-spin mr-2" />
+            <span>Loading polygon data from Google Sheets...</span>
+          </div>
+        )}
 
         {sheetData && (
-          <>
-             <FormField
-              control={form.control}
-              name="terminalIdColumn"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Terminal ID Column</FormLabel>
-                  <Select
-                    onValueChange={field.onChange}
-                    defaultValue={field.value}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select terminal ID column" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {sheetData.headers.map((header) => (
-                        <SelectItem key={header} value={header}>
-                          {header}
+          <FormField
+            control={form.control}
+            name="selectedTerminalId"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Select Terminal ID</FormLabel>
+                <Select
+                  onValueChange={field.onChange}
+                  defaultValue={field.value}
+                >
+                  <FormControl>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a Terminal ID" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    {uniqueTerminalIds.map((id) => (
+                        <SelectItem key={id} value={id}>
+                          {id}
                         </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="wktColumn"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Polygon (WKT) Column</FormLabel>
-                  <Select
-                    onValueChange={field.onChange}
-                    defaultValue={field.value}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select column with WKT data" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {sheetData.headers.map((header) => (
-                        <SelectItem key={header} value={header}>
-                          {header}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            {watchedTerminalIdColumn && watchedWktColumn && (
-              <FormField
-                control={form.control}
-                name="selectedTerminalId"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Select Terminal ID</FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      defaultValue={field.value}
-                    >
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select a Terminal ID" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {uniqueTerminalIds.map((id) => (
-                            <SelectItem key={id} value={id}>
-                              {id}
-                            </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
             )}
-          </>
+          />
         )}
 
         <FormField

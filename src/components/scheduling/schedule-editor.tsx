@@ -17,7 +17,8 @@ import {
   validateScheduleName,
   formatTimeSlot,
   sortScheduledHexagonsByTime,
-  createCustomTimeSlot
+  createCustomTimeSlot,
+  getHexagonNumber
 } from '@/lib/scheduling-utils';
 import CustomTimeInput from './custom-time-input';
 
@@ -31,6 +32,8 @@ interface ScheduleEditorProps {
   onHexagonSelect: (hexagonId: string) => void;
   onHexagonDeselect: (hexagonId: string) => void;
   onHexagonSelectWithCustomTime: (hexagonId: string, timeSlot: any, duration: number) => void;
+  onLocalScheduledHexagonsChange?: (hexagons: ScheduledHexagon[]) => void;
+  onHexagonVisualSelect?: (hexagonId: string) => void;
 }
 
 export default function ScheduleEditor({
@@ -43,6 +46,8 @@ export default function ScheduleEditor({
   onHexagonSelect,
   onHexagonDeselect,
   onHexagonSelectWithCustomTime,
+  onLocalScheduledHexagonsChange,
+  onHexagonVisualSelect,
 }: ScheduleEditorProps) {
   const [scheduleName, setScheduleName] = useState(schedule?.name || '');
   const [nameError, setNameError] = useState<string | null>(null);
@@ -50,20 +55,38 @@ export default function ScheduleEditor({
   const [selectedHexagonForCustomTime, setSelectedHexagonForCustomTime] = useState<string | null>(null);
   const { toast } = useToast();
 
+  // Local state for managing scheduled hexagons for both create and edit
+  const [localScheduledHexagons, setLocalScheduledHexagons] = useState<ScheduledHexagon[]>([]);
+  
+  // Always use local scheduled state for rendering; initialize from schedule when editing
+  const currentScheduledHexagons = localScheduledHexagons;
+
   const allTimeSlots = generateTimeSlots();
-  const assignedTimeSlots = scheduledHexagons.map(h => h.timeSlot);
+  const assignedTimeSlots = currentScheduledHexagons.map(h => h.timeSlot);
   const isAllSlotsFilled = areAllTimeSlotsFilled(allTimeSlots, assignedTimeSlots);
 
   useEffect(() => {
     if (schedule) {
       setScheduleName(schedule.name);
+      setLocalScheduledHexagons(schedule.hexagons || []);
+    } else {
+      // When creating a new schedule, reset local state
+      setScheduleName('');
+      setLocalScheduledHexagons([]);
     }
   }, [schedule]);
+
+  // Notify parent when local scheduled hexagons change (for both create and edit)
+  useEffect(() => {
+    if (onLocalScheduledHexagonsChange) {
+      onLocalScheduledHexagonsChange(localScheduledHexagons);
+    }
+  }, [localScheduledHexagons, onLocalScheduledHexagonsChange]);
 
   // Detect when a new hexagon is selected via map click and show time input
   useEffect(() => {
     const selectedArray = Array.from(selectedHexagons);
-    const scheduledArray = scheduledHexagons.map(h => h.hexagonId);
+    const scheduledArray = currentScheduledHexagons.map(h => h.hexagonId);
     
     // Find newly selected hexagons that aren't scheduled yet
     const newlySelected = selectedArray.find(hexId => 
@@ -75,7 +98,7 @@ export default function ScheduleEditor({
       setSelectedHexagonForCustomTime(newlySelected);
       setShowCustomTimeInput(true);
     }
-  }, [selectedHexagons, scheduledHexagons, showCustomTimeInput]);
+  }, [selectedHexagons, currentScheduledHexagons, showCustomTimeInput]);
 
   const handleNameChange = (value: string) => {
     setScheduleName(value);
@@ -84,12 +107,19 @@ export default function ScheduleEditor({
 
   const handleAddHexagon = (hexagonId: string) => {
     // Always show custom time input when selecting a hexagon
+    // Trigger visual selection on the map so the hexagon turns blue
+    if (onHexagonVisualSelect) {
+      onHexagonVisualSelect(hexagonId);
+    }
     setSelectedHexagonForCustomTime(hexagonId);
     setShowCustomTimeInput(true);
   };
 
   const handleRemoveHexagon = (hexagonId: string) => {
+    // Always inform parent to clear visual selection and any global state
     onHexagonDeselect(hexagonId);
+    // Update local state (both create and edit)
+    setLocalScheduledHexagons(prev => prev.filter(h => h.hexagonId !== hexagonId));
   };
 
   const handleCustomTimeSelect = (hexagonId: string) => {
@@ -99,6 +129,17 @@ export default function ScheduleEditor({
 
   const handleCustomTimeSlotSelect = (timeSlot: any, duration: number) => {
     if (selectedHexagonForCustomTime) {
+      const hexagonNumber = getHexagonNumber(selectedHexagonForCustomTime, availableHexagons);
+      const newScheduledHexagon: ScheduledHexagon = {
+        hexagonId: selectedHexagonForCustomTime,
+        hexagonNumber,
+        timeSlot,
+        polygonId: 0, // Will be updated when the schedule is saved or when parent syncs
+        customDuration: duration,
+      };
+      // Update local state (so UI reflects immediately and prevents reopen loop)
+      setLocalScheduledHexagons(prev => [...prev, newScheduledHexagon]);
+      // Inform parent for global map coloring/state
       onHexagonSelectWithCustomTime(selectedHexagonForCustomTime, timeSlot, duration);
     }
     setShowCustomTimeInput(false);
@@ -117,7 +158,7 @@ export default function ScheduleEditor({
       return;
     }
 
-    if (scheduledHexagons.length === 0) {
+    if (currentScheduledHexagons.length === 0) {
       toast({
         variant: 'destructive',
         title: 'No Hexagons Selected',
@@ -126,10 +167,10 @@ export default function ScheduleEditor({
       return;
     }
 
-    onSave(scheduleName.trim(), scheduledHexagons);
+    onSave(scheduleName.trim(), currentScheduledHexagons);
   };
 
-  const sortedScheduledHexagons = sortScheduledHexagonsByTime(scheduledHexagons);
+  const sortedScheduledHexagons = sortScheduledHexagonsByTime(currentScheduledHexagons);
 
   return (
     <div className="space-y-4 px-2">
@@ -155,7 +196,7 @@ export default function ScheduleEditor({
         <div className="flex items-center justify-between">
           <h4 className="font-medium">Available Hexagons</h4>
           <Badge variant="outline">
-            {Math.max(0, availableHexagons.length - scheduledHexagons.length)} available
+            {Math.max(0, availableHexagons.length - currentScheduledHexagons.length)} available
           </Badge>
         </div>
 
@@ -188,7 +229,7 @@ export default function ScheduleEditor({
           <div className="grid grid-cols-2 gap-2 max-h-32 overflow-y-auto">
             {availableHexagons.map((hexagonId) => {
               const isSelected = selectedHexagons.has(hexagonId);
-              const isScheduled = scheduledHexagons.some(h => h.hexagonId === hexagonId);
+              const isScheduled = currentScheduledHexagons.some(h => h.hexagonId === hexagonId);
               
               return (
                 <Button
@@ -228,11 +269,11 @@ export default function ScheduleEditor({
         <div className="flex items-center justify-between">
           <h4 className="font-medium">Scheduled Hexagons</h4>
           <Badge variant="default">
-            {scheduledHexagons.length} scheduled
+            {currentScheduledHexagons.length} scheduled
           </Badge>
         </div>
 
-        {scheduledHexagons.length === 0 ? (
+        {currentScheduledHexagons.length === 0 ? (
           <div className="p-4 text-center text-sm text-muted-foreground border-2 border-dashed rounded-lg">
             <MapPin className="h-8 w-8 mx-auto mb-2 opacity-50" />
             <p>No hexagons scheduled yet.</p>
@@ -281,7 +322,7 @@ export default function ScheduleEditor({
             onTimeSlotSelect={handleCustomTimeSlotSelect}
             onCancel={handleCancelCustomTime}
             selectedHexagonId={selectedHexagonForCustomTime}
-            scheduledHexagons={scheduledHexagons}
+            scheduledHexagons={currentScheduledHexagons}
           />
         </div>
       )}

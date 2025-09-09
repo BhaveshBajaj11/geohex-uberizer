@@ -111,6 +111,9 @@ export default function MapComponent({
 
       const center = getCenter(hex.boundary);
       
+      // Create marker with appropriate icon and click handler
+      let marker;
+      
       // Show numbers only for selected hexagons (when creating routes)
       if (isSelectedForSchedule) {
         // Get the selection order by finding the index in the scheduledHexagons array
@@ -123,28 +126,23 @@ export default function MapComponent({
             iconAnchor: [12, 12]
         });
 
-        const marker = L.marker(center, { icon: numberIcon }).addTo(group);
-        
-        // Add click handler if provided
-        if (onHexagonClick) {
-          marker.on('click', () => {
-            onHexagonClick(hex.index);
-          });
-        }
+        marker = L.marker(center, { icon: numberIcon }).addTo(group);
       } else {
-        // When not showing numbers, still add a clickable marker for interaction
-        if (onHexagonClick) {
-          const invisibleIcon = L.divIcon({
-            className: 'invisible-marker',
-            html: '<div></div>',
-            iconSize: [24, 24],
-            iconAnchor: [12, 12]
-          });
-          const marker = L.marker(center, { icon: invisibleIcon }).addTo(group);
-          marker.on('click', () => {
-            onHexagonClick(hex.index);
-          });
-        }
+        // When not showing numbers, add an invisible marker for interaction
+        const invisibleIcon = L.divIcon({
+          className: 'invisible-marker',
+          html: '<div></div>',
+          iconSize: [24, 24],
+          iconAnchor: [12, 12]
+        });
+        marker = L.marker(center, { icon: invisibleIcon }).addTo(group);
+      }
+      
+      // Always add click handler if provided, regardless of selection state
+      if (onHexagonClick && marker) {
+        marker.on('click', () => {
+          onHexagonClick(hex.index);
+        });
       }
     });
 

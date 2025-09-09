@@ -134,3 +134,6 @@ export default function ScheduleList({ schedules, onEdit, onDelete, onDuplicate 
     </div>
   );
 }
+
+
+
