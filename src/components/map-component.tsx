@@ -18,6 +18,7 @@ type MapComponentProps = {
   scheduledHexagons?: { hexagonId: string; hexagonNumber: number; timeSlot: { start: string; end: string } }[];
   selectedHexagonsForSchedule?: Set<string>;
   onHexagonClick?: (hexagonId: string) => void;
+  editingHexagonId?: string | null;
 };
 
 const getCenter = (boundary: LatLngLiteral[]): LatLngExpression => {
@@ -36,7 +37,8 @@ export default function MapComponent({
   hoveredHexIndex, 
   scheduledHexagons = [], 
   selectedHexagonsForSchedule = new Set(),
-  onHexagonClick
+  onHexagonClick,
+  editingHexagonId = null,
 }: MapComponentProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<L.Map | null>(null);
@@ -82,13 +84,20 @@ export default function MapComponent({
       const isHovered = hex.index === hoveredHexIndex;
       const isScheduled = scheduledHexagons.some(sh => sh.hexagonId === hex.index);
       const isSelectedForSchedule = selectedHexagonsForSchedule.has(hex.index);
+      const isEditing = editingHexagonId === hex.index;
       
       // Determine hexagon color based on state
       let hexColor = 'red';
       let fillColor = 'red';
       let fillOpacity = 0.2;
+      let weight = 3;
       
-      if (isScheduled) {
+      if (isEditing) {
+        hexColor = '#f59e0b'; // Amber for editing
+        fillColor = '#f59e0b';
+        fillOpacity = 0.5;
+        weight = 5;
+      } else if (isScheduled) {
         hexColor = '#22c55e'; // Green for scheduled
         fillColor = '#22c55e';
         fillOpacity = 0.4;
@@ -103,7 +112,7 @@ export default function MapComponent({
 
       const hexPolygon = L.polygon(hex.boundary as LatLngExpression[], {
         color: hexColor,
-        weight: 3,
+        weight: weight,
         opacity: 0.8,
         fillColor: fillColor,
         fillOpacity: fillOpacity,

@@ -27,6 +27,8 @@ interface ScheduleTabProps {
   selectedTerminalId?: string;
   onClearSchedulingState?: () => void;
   onHexagonVisualSelect?: (hexagonId: string) => void;
+  onTimeInputOpenChange?: (isOpen: boolean) => void;
+  onEditHexagonChange?: (hexId: string | null) => void;
 }
 
 export default function ScheduleTab({
@@ -47,6 +49,8 @@ export default function ScheduleTab({
   selectedTerminalId,
   onClearSchedulingState,
   onHexagonVisualSelect,
+  onTimeInputOpenChange,
+  onEditHexagonChange,
 }: ScheduleTabProps) {
   const [currentView, setCurrentView] = useState<'list' | 'create' | 'edit'>('list');
   const [editingSchedule, setEditingSchedule] = useState<HexagonSchedule | null>(null);
@@ -136,12 +140,6 @@ export default function ScheduleTab({
     <div className="space-y-4">
       {currentView === 'list' && (
         <>
-          <GoogleSheetsConfig
-            onRouteSave={handleRouteSave}
-            onRoutesLoaded={handleRoutesLoaded}
-            currentRoutes={schedules}
-            selectedTerminalId={selectedTerminalId}
-          />
           <div className="flex items-center justify-between px-2">
             <div className="flex flex-col">
               <h3 className="text-lg font-semibold">Schedule Routes</h3>
@@ -159,6 +157,12 @@ export default function ScheduleTab({
             onEdit={handleEdit}
             onDelete={onScheduleDelete}
             onDuplicate={onScheduleDuplicate}
+          />
+          <GoogleSheetsConfig
+            onRouteSave={handleRouteSave}
+            onRoutesLoaded={handleRoutesLoaded}
+            currentRoutes={schedules}
+            selectedTerminalId={selectedTerminalId}
           />
         </>
       )}
@@ -186,6 +190,9 @@ export default function ScheduleTab({
             onHexagonSelectWithCustomTime={onHexagonSelectWithCustomTime}
             onLocalScheduledHexagonsChange={onLocalScheduledHexagonsChange}
             onHexagonVisualSelect={onHexagonVisualSelect}
+            onTimeInputOpenChange={onTimeInputOpenChange}
+            onEditHexagonChange={onEditHexagonChange}
+            selectedTerminalId={selectedTerminalId}
           />
         </>
       )}

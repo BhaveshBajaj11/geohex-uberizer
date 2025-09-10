@@ -60,6 +60,8 @@ export default function Home() {
   const [scheduleView, setScheduleView] = useState<'list' | 'create' | 'edit'>('list');
   const [selectedTerminalId, setSelectedTerminalId] = useState<string>('');
   const [terminalHexagons, setTerminalHexagons] = useState<string[]>([]);
+  const [isTimeInputOpen, setIsTimeInputOpen] = useState<boolean>(false);
+  const [editingHexagonId, setEditingHexagonId] = useState<string | null>(null);
 
   useEffect(() => {
     // Update map hexagons when selection changes
@@ -424,6 +426,10 @@ export default function Home() {
 
   // New handler for map clicks that triggers time input
   const handleMapHexagonClick = (hexagonId: string) => {
+    // Prevent selecting another hexagon while time input is open
+    if (isTimeInputOpen) {
+      return;
+    }
     // Check if hexagon is already scheduled
     const isScheduled = scheduledHexagons.some(h => h.hexagonId === hexagonId);
     
@@ -517,6 +523,8 @@ export default function Home() {
                 selectedTerminalId={selectedTerminalId}
                 onClearSchedulingState={handleClearSchedulingState}
                 onHexagonVisualSelect={(hexagonId) => setSelectedHexagonsForSchedule(prev => new Set([...prev, hexagonId]))}
+                onTimeInputOpenChange={(open) => setIsTimeInputOpen(open)}
+                onEditHexagonChange={(hexId) => setEditingHexagonId(hexId)}
               />
             </TabsContent>
           </Tabs>
@@ -535,6 +543,7 @@ export default function Home() {
             scheduledHexagons={scheduledHexagons}
             selectedHexagonsForSchedule={selectedHexagonsForSchedule}
             onHexagonClick={activeTab === 'schedules' && (scheduleView === 'create' || scheduleView === 'edit') ? handleMapHexagonClick : undefined}
+            editingHexagonId={editingHexagonId}
           />
         </main>
       </ResizableSidebarInset>

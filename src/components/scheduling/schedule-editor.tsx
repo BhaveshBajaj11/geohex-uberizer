@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
-import { X, Clock, MapPin, Plus } from 'lucide-react';
+import { X, Clock, MapPin, Plus, Edit } from 'lucide-react';
 import { 
   generateTimeSlots, 
   getNextAvailableTimeSlot, 
@@ -21,6 +21,7 @@ import {
   getHexagonNumber
 } from '@/lib/scheduling-utils';
 import CustomTimeInput from './custom-time-input';
+import { timeToMinutes, minutesToTime } from '@/lib/scheduling-utils';
 
 interface ScheduleEditorProps {
   schedule?: HexagonSchedule | null;
@@ -34,6 +35,9 @@ interface ScheduleEditorProps {
   onHexagonSelectWithCustomTime: (hexagonId: string, timeSlot: any, duration: number) => void;
   onLocalScheduledHexagonsChange?: (hexagons: ScheduledHexagon[]) => void;
   onHexagonVisualSelect?: (hexagonId: string) => void;
+  onTimeInputOpenChange?: (isOpen: boolean) => void;
+  onEditHexagonChange?: (hexId: string | null) => void;
+  selectedTerminalId?: string;
 }
 
 export default function ScheduleEditor({
@@ -48,6 +52,9 @@ export default function ScheduleEditor({
   onHexagonSelectWithCustomTime,
   onLocalScheduledHexagonsChange,
   onHexagonVisualSelect,
+  onTimeInputOpenChange,
+  onEditHexagonChange,
+  selectedTerminalId,
 }: ScheduleEditorProps) {
   const [scheduleName, setScheduleName] = useState(schedule?.name || '');
   const [nameError, setNameError] = useState<string | null>(null);
@@ -97,6 +104,7 @@ export default function ScheduleEditor({
     if (newlySelected) {
       setSelectedHexagonForCustomTime(newlySelected);
       setShowCustomTimeInput(true);
+      if (onTimeInputOpenChange) onTimeInputOpenChange(true);
     }
   }, [selectedHexagons, currentScheduledHexagons, showCustomTimeInput]);
 
@@ -106,6 +114,7 @@ export default function ScheduleEditor({
   };
 
   const handleAddHexagon = (hexagonId: string) => {
+    if (showCustomTimeInput) return; // lock selection while time input is open
     // Always show custom time input when selecting a hexagon
     // Trigger visual selection on the map so the hexagon turns blue
     if (onHexagonVisualSelect) {
@@ -113,6 +122,7 @@ export default function ScheduleEditor({
     }
     setSelectedHexagonForCustomTime(hexagonId);
     setShowCustomTimeInput(true);
+    if (onTimeInputOpenChange) onTimeInputOpenChange(true);
   };
 
   const handleRemoveHexagon = (hexagonId: string) => {
@@ -125,30 +135,99 @@ export default function ScheduleEditor({
   const handleCustomTimeSelect = (hexagonId: string) => {
     setSelectedHexagonForCustomTime(hexagonId);
     setShowCustomTimeInput(true);
+    if (onEditHexagonChange) onEditHexagonChange(hexagonId);
   };
 
   const handleCustomTimeSlotSelect = (timeSlot: any, duration: number) => {
-    if (selectedHexagonForCustomTime) {
+    if (!selectedHexagonForCustomTime) {
+      setShowCustomTimeInput(false);
+      if (onTimeInputOpenChange) onTimeInputOpenChange(false);
+      return;
+    }
+
+    const isEditingExisting = localScheduledHexagons.some(h => h.hexagonId === selectedHexagonForCustomTime);
+
+    if (isEditingExisting) {
+      // Cascade update from the edited hexagon forward, preserving durations
+      const sorted = sortScheduledHexagonsByTime(localScheduledHexagons);
+      const idx = sorted.findIndex(h => h.hexagonId === selectedHexagonForCustomTime);
+      if (idx === -1) {
+        setShowCustomTimeInput(false);
+        setSelectedHexagonForCustomTime(null);
+        if (onTimeInputOpenChange) onTimeInputOpenChange(false);
+        return;
+      }
+
+      const updated = [...sorted];
+      // Update the edited hexagon
+      const edited = { ...updated[idx] };
+      edited.timeSlot = { ...edited.timeSlot, start: timeSlot.start, end: timeSlot.end };
+      edited.customDuration = duration;
+      updated[idx] = edited;
+
+      // Recompute subsequent hexagons preserving their durations
+      for (let i = idx + 1; i < updated.length; i++) {
+        const prevEnd = updated[i - 1].timeSlot.end;
+        const dur = updated[i].customDuration ?? (timeToMinutes(updated[i].timeSlot.end) - timeToMinutes(updated[i].timeSlot.start));
+        const newStart = prevEnd;
+        const newEnd = minutesToTime(timeToMinutes(newStart) + dur);
+        updated[i] = {
+          ...updated[i],
+          timeSlot: { ...updated[i].timeSlot, start: newStart, end: newEnd },
+          customDuration: dur,
+        };
+      }
+
+      // Constraint: last end must be <= 20:00
+      const lastEndMinutes = timeToMinutes(updated[updated.length - 1].timeSlot.end);
+      if (lastEndMinutes > timeToMinutes('20:00')) {
+        toast({
+          variant: 'destructive',
+          title: 'Time exceeds allowed range',
+          description: 'Schedules must fit between 4:30 PM and 8:00 PM.',
+        });
+        return; // do not apply
+      }
+
+      // Apply updates back to local state preserving original unsorted order by hexagonId mapping
+      const updatedById = new Map(updated.map(h => [h.hexagonId, h] as const));
+      setLocalScheduledHexagons(prev => prev.map(h => updatedById.get(h.hexagonId) || h));
+    } else {
+      // New selection case
       const hexagonNumber = getHexagonNumber(selectedHexagonForCustomTime, availableHexagons);
       const newScheduledHexagon: ScheduledHexagon = {
         hexagonId: selectedHexagonForCustomTime,
         hexagonNumber,
         timeSlot,
-        polygonId: 0, // Will be updated when the schedule is saved or when parent syncs
+        polygonId: 0,
         customDuration: duration,
       };
-      // Update local state (so UI reflects immediately and prevents reopen loop)
       setLocalScheduledHexagons(prev => [...prev, newScheduledHexagon]);
-      // Inform parent for global map coloring/state
       onHexagonSelectWithCustomTime(selectedHexagonForCustomTime, timeSlot, duration);
     }
+
     setShowCustomTimeInput(false);
     setSelectedHexagonForCustomTime(null);
+    if (onTimeInputOpenChange) onTimeInputOpenChange(false);
+    if (onEditHexagonChange) onEditHexagonChange(null);
+  };
+
+  const handleEditScheduledHexagon = (hexagonId: string) => {
+    setSelectedHexagonForCustomTime(hexagonId);
+    setShowCustomTimeInput(true);
+    if (onTimeInputOpenChange) onTimeInputOpenChange(true);
+    if (onEditHexagonChange) onEditHexagonChange(hexagonId);
   };
 
   const handleCancelCustomTime = () => {
     setShowCustomTimeInput(false);
+    // If this was a new selection (not yet scheduled), deselect it visually
+    if (selectedHexagonForCustomTime && !localScheduledHexagons.some(h => h.hexagonId === selectedHexagonForCustomTime)) {
+      onHexagonDeselect(selectedHexagonForCustomTime);
+    }
     setSelectedHexagonForCustomTime(null);
+    if (onTimeInputOpenChange) onTimeInputOpenChange(false);
+    if (onEditHexagonChange) onEditHexagonChange(null);
   };
 
   const handleSave = () => {
@@ -171,9 +250,27 @@ export default function ScheduleEditor({
   };
 
   const sortedScheduledHexagons = sortScheduledHexagonsByTime(currentScheduledHexagons);
+  const existingSlotsForValidation = (() => {
+    if (!selectedHexagonForCustomTime) return assignedTimeSlots;
+    const isEditingExisting = currentScheduledHexagons.some(h => h.hexagonId === selectedHexagonForCustomTime);
+    if (!isEditingExisting) {
+      // Creating new: validate against all current slots
+      return assignedTimeSlots;
+    }
+    // Editing existing: only validate against prior hexagons; future ones will be shifted
+    const sorted = sortScheduledHexagonsByTime(currentScheduledHexagons);
+    const idx = sorted.findIndex(h => h.hexagonId === selectedHexagonForCustomTime);
+    if (idx <= 0) return [];
+    return sorted.slice(0, idx).map(h => h.timeSlot);
+  })();
 
   return (
     <div className="space-y-4 px-2">
+      {selectedTerminalId && (
+        <div className="text-sm text-muted-foreground">
+          <span className="font-medium">Terminal ID:</span> {selectedTerminalId}
+        </div>
+      )}
       {/* Schedule Name */}
       <div className="space-y-2">
         <Label htmlFor="schedule-name">Schedule Name</Label>
@@ -300,13 +397,24 @@ export default function ScheduleEditor({
                       </p>
                     </div>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleRemoveHexagon(scheduledHex.hexagonId)}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleEditScheduledHexagon(scheduledHex.hexagonId)}
+                      title="Edit time"
+                    >
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRemoveHexagon(scheduledHex.hexagonId)}
+                      title="Remove from schedule"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               </Card>
             ))}
@@ -317,13 +425,22 @@ export default function ScheduleEditor({
       {/* Custom Time Input */}
       {showCustomTimeInput && (
         <div className="mt-4">
-          <CustomTimeInput
-            existingSlots={assignedTimeSlots}
-            onTimeSlotSelect={handleCustomTimeSlotSelect}
-            onCancel={handleCancelCustomTime}
-            selectedHexagonId={selectedHexagonForCustomTime}
-            scheduledHexagons={currentScheduledHexagons}
-          />
+          {(() => {
+            const editing = currentScheduledHexagons.find(h => h.hexagonId === selectedHexagonForCustomTime);
+            const defStart = editing ? editing.timeSlot.start : undefined;
+            const defDuration = editing ? (editing.customDuration ?? (timeToMinutes(editing.timeSlot.end) - timeToMinutes(editing.timeSlot.start))) : undefined;
+            return (
+              <CustomTimeInput
+                existingSlots={existingSlotsForValidation}
+                onTimeSlotSelect={handleCustomTimeSlotSelect}
+                onCancel={handleCancelCustomTime}
+                selectedHexagonId={selectedHexagonForCustomTime}
+                scheduledHexagons={currentScheduledHexagons}
+                defaultStartTime={defStart}
+                defaultDuration={defDuration}
+              />
+            );
+          })()}
         </div>
       )}
 
