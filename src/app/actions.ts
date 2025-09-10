@@ -5,7 +5,7 @@ import Papa from 'papaparse';
 import type { HexagonSchedule, ScheduledHexagon } from '@/types/scheduling';
 
 // Hardcoded Google Sheets URLs
-const POLYGON_SHEET_URL = 'https://docs.google.com/spreadsheets/d/100PpgFmO116AwqEZduLG_94U7JBUPa1_wvd3keZpL2A/edit?gid=1047790723#gid=1047790723';
+const POLYGON_SHEET_URL = 'https://docs.google.com/spreadsheets/d/100PpgFmO116AwqEZduLG_94U7JBUPa1_wvd3keZpL2A/edit?gid=0#gid=0';
 const SCHEDULE_ROUTES_SHEET_URL = 'https://docs.google.com/spreadsheets/d/100PpgFmO116AwqEZduLG_94U7JBUPa1_wvd3keZpL2A/edit?gid=1174409#gid=1174409';
 
 function getSheetIdAndGid(url: string): {sheetId: string | null; gid: string | null} {

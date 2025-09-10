@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { HexagonSchedule, ScheduledHexagon } from '@/types/scheduling';
 import ScheduleList from './schedule-list';
 import ScheduleEditor from './schedule-editor';
 import GoogleSheetsConfig from './google-sheets-config';
 import { Button } from '@/components/ui/button';
 import { Plus, ArrowLeft } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
 
 interface ScheduleTabProps {
   schedules: HexagonSchedule[];
@@ -49,6 +50,12 @@ export default function ScheduleTab({
 }: ScheduleTabProps) {
   const [currentView, setCurrentView] = useState<'list' | 'create' | 'edit'>('list');
   const [editingSchedule, setEditingSchedule] = useState<HexagonSchedule | null>(null);
+  const { toast } = useToast();
+
+  const hasScheduleForSelectedTerminal = useMemo(() => {
+    if (!selectedTerminalId) return false;
+    return schedules.some(s => s.terminalId === selectedTerminalId);
+  }, [schedules, selectedTerminalId]);
 
   const handleCreateNew = () => {
     setCurrentView('create');
@@ -90,6 +97,16 @@ export default function ScheduleTab({
     if (editingSchedule) {
       onScheduleUpdate(editingSchedule.id, { name, hexagons, updatedAt: new Date() });
     } else {
+      if (hasScheduleForSelectedTerminal) {
+        toast({
+          variant: 'destructive',
+          title: 'Limit Reached',
+          description: 'Only one route per terminal is allowed. Edit the existing route instead.',
+        });
+        setCurrentView('list');
+        if (onViewChange) onViewChange('list');
+        return;
+      }
       onScheduleCreate(name, hexagons, selectedTerminalId);
     }
     handleBackToList();
@@ -126,8 +143,13 @@ export default function ScheduleTab({
             selectedTerminalId={selectedTerminalId}
           />
           <div className="flex items-center justify-between px-2">
-            <h3 className="text-lg font-semibold">Schedule Routes</h3>
-            <Button onClick={handleCreateNew} size="sm">
+            <div className="flex flex-col">
+              <h3 className="text-lg font-semibold">Schedule Routes</h3>
+              {hasScheduleForSelectedTerminal && (
+                <span className="text-xs text-muted-foreground">Only one route per terminal is allowed.</span>
+              )}
+            </div>
+            <Button onClick={handleCreateNew} size="sm" disabled={hasScheduleForSelectedTerminal} title={hasScheduleForSelectedTerminal ? 'Only one route per terminal is allowed. Edit the existing route.' : ''}>
               <Plus className="h-4 w-4 mr-2" />
               New Schedule
             </Button>

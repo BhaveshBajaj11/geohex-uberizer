@@ -302,22 +302,34 @@ export default function Home() {
 
   const handleScheduleDuplicate = (id: string) => {
     const scheduleToDuplicate = schedules.find(s => s.id === id);
-    if (scheduleToDuplicate) {
-      const duplicatedSchedule: HexagonSchedule = {
-        ...scheduleToDuplicate,
-        id: generateScheduleId(),
-        name: `${scheduleToDuplicate.name} (Copy)`,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-      
-      setSchedules(prev => [...prev, duplicatedSchedule]);
-      
+    if (!scheduleToDuplicate) return;
+
+    // Enforce one route per terminal
+    const terminalIdForSchedule = scheduleToDuplicate.terminalId || '';
+    const alreadyHasRouteForTerminal = schedules.some(s => s.terminalId === terminalIdForSchedule);
+    if (alreadyHasRouteForTerminal) {
       toast({
-        title: 'Schedule Duplicated',
-        description: `"${duplicatedSchedule.name}" has been created.`,
+        variant: 'destructive',
+        title: 'Limit Reached',
+        description: 'Only one route per terminal is allowed. Edit the existing route instead.',
       });
+      return;
     }
+
+    const duplicatedSchedule: HexagonSchedule = {
+      ...scheduleToDuplicate,
+      id: generateScheduleId(),
+      name: `${scheduleToDuplicate.name} (Copy)`,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    
+    setSchedules(prev => [...prev, duplicatedSchedule]);
+    
+    toast({
+      title: 'Schedule Duplicated',
+      description: `"${duplicatedSchedule.name}" has been created.`,
+    });
   };
 
   const handleClearSchedulingState = () => {

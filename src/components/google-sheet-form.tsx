@@ -29,6 +29,7 @@ import { useToast } from '@/hooks/use-toast';
 import { fetchGoogleSheetData } from '@/app/actions';
 
 const formSchema = z.object({
+  selectedPitstopKey: z.string().optional(),
   selectedTerminalId: z.string().optional(),
   resolution: z.coerce.number().min(0).max(15),
 });
@@ -62,7 +63,29 @@ export default function GoogleSheetForm({ onSubmit }: GoogleSheetFormProps) {
   const { watch, formState } = form;
   const { isSubmitting } = formState;
 
+  const watchedSelectedPitstopKey = watch('selectedPitstopKey');
   const watchedSelectedTerminalId = watch('selectedTerminalId');
+
+  type Pitstop = { key: string; psName: string; pitstopId: string };
+
+  const uniquePitstops: Pitstop[] = useMemo(() => {
+    if (!sheetData) return [];
+    const psNameIndex = sheetData.headers.indexOf('PS Name');
+    const pitstopIdIndex = sheetData.headers.indexOf('Pitstop ID');
+    if (psNameIndex === -1) return [];
+
+    const map = new Map<string, Pitstop>();
+    sheetData.rows.forEach(row => {
+      const psName = row[psNameIndex] || '';
+      const pitstopId = pitstopIdIndex !== -1 ? (row[pitstopIdIndex] || '') : '';
+      if (!psName) return;
+      const key = `${psName}:::${pitstopId}`;
+      if (!map.has(key)) {
+        map.set(key, { key, psName, pitstopId });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.psName.localeCompare(b.psName));
+  }, [sheetData]);
 
   const uniqueTerminalIds = useMemo(() => {
     if (!sheetData) return [];
@@ -79,12 +102,44 @@ export default function GoogleSheetForm({ onSubmit }: GoogleSheetFormProps) {
     return Array.from(ids).sort();
   }, [sheetData]);
 
+  const filteredTerminalIds = useMemo(() => {
+    if (!sheetData) return [];
+    if (!watchedSelectedPitstopKey) return [];
+    const [selectedPsName, selectedPitstopId] = watchedSelectedPitstopKey.split(':::');
+
+    const terminalIdIndex = sheetData.headers.indexOf('Terminal ID');
+    const psNameIndex = sheetData.headers.indexOf('PS Name');
+    const pitstopIdIndex = sheetData.headers.indexOf('Pitstop ID');
+    if (terminalIdIndex === -1 || psNameIndex === -1) return [];
+
+    const ids = new Set<string>();
+    sheetData.rows.forEach(row => {
+      const psName = row[psNameIndex] || '';
+      const pitId = pitstopIdIndex !== -1 ? (row[pitstopIdIndex] || '') : '';
+      const matchesPs = psName === selectedPsName;
+      const matchesPit = pitstopIdIndex !== -1 ? (pitId === selectedPitstopId) : true;
+      if (matchesPs && matchesPit) {
+        const id = row[terminalIdIndex];
+        if (id) ids.add(id);
+      }
+    });
+    return Array.from(ids).sort();
+  }, [sheetData, watchedSelectedPitstopKey]);
+
+  // When pitstop changes, clear terminal selection
+  useEffect(() => {
+    if (watchedSelectedPitstopKey) {
+      form.setValue('selectedTerminalId', undefined);
+    }
+  }, [watchedSelectedPitstopKey]);
+
 
   const handleFetchSheet = async () => {
     setIsFetching(true);
     setSheetData(null);
     form.reset({ 
         ...form.getValues(), 
+        selectedPitstopKey: undefined,
         selectedTerminalId: undefined 
     });
 
@@ -107,9 +162,12 @@ export default function GoogleSheetForm({ onSubmit }: GoogleSheetFormProps) {
         return;
       }
       
+      const hasPsName = result.data.headers.includes('PS Name');
       toast({
         title: 'Sheet Loaded',
-        description: `Found ${result.data.rows.length} rows. Please select a Terminal ID.`,
+        description: hasPsName
+          ? `Found ${result.data.rows.length} rows. Please select a Pitstop.`
+          : `Found ${result.data.rows.length} rows. Please select a Terminal ID.`,
       });
     } else {
       toast({
@@ -169,7 +227,37 @@ export default function GoogleSheetForm({ onSubmit }: GoogleSheetFormProps) {
           </div>
         )}
 
-        {sheetData && (
+        {sheetData && uniquePitstops.length > 0 && (
+          <FormField
+            control={form.control}
+            name="selectedPitstopKey"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Select Pitstop</FormLabel>
+                <Select
+                  onValueChange={field.onChange}
+                  defaultValue={field.value}
+                >
+                  <FormControl>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a Pitstop" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    {uniquePitstops.map((p) => (
+                      <SelectItem key={p.key} value={p.key}>
+                        {p.pitstopId ? `${p.psName} (${p.pitstopId})` : p.psName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        )}
+
+        {sheetData && (!uniquePitstops.length || watchedSelectedPitstopKey) && (
           <FormField
             control={form.control}
             name="selectedTerminalId"
@@ -186,7 +274,9 @@ export default function GoogleSheetForm({ onSubmit }: GoogleSheetFormProps) {
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>
-                    {uniqueTerminalIds.map((id) => (
+                    {(uniquePitstops.length && watchedSelectedPitstopKey
+                      ? filteredTerminalIds
+                      : uniqueTerminalIds).map((id) => (
                         <SelectItem key={id} value={id}>
                           {id}
                         </SelectItem>

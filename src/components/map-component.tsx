@@ -101,7 +101,7 @@ export default function MapComponent({
         fillOpacity = 0.6;
       }
 
-      L.polygon(hex.boundary as LatLngExpression[], {
+      const hexPolygon = L.polygon(hex.boundary as LatLngExpression[], {
         color: hexColor,
         weight: 3,
         opacity: 0.8,
@@ -114,8 +114,8 @@ export default function MapComponent({
       // Create marker with appropriate icon and click handler
       let marker;
       
-      // Show numbers only for selected hexagons (when creating routes)
-      if (isSelectedForSchedule) {
+      // Show numbers for scheduled hexagons (edit mode) and for actively selected ones (create mode)
+      if (isScheduled || isSelectedForSchedule) {
         // Get the selection order by finding the index in the scheduledHexagons array
         const selectionOrder = scheduledHexagons.findIndex(sh => sh.hexagonId === hex.index) + 1;
         
@@ -138,11 +138,12 @@ export default function MapComponent({
         marker = L.marker(center, { icon: invisibleIcon }).addTo(group);
       }
       
-      // Always add click handler if provided, regardless of selection state
-      if (onHexagonClick && marker) {
-        marker.on('click', () => {
-          onHexagonClick(hex.index);
-        });
+      // Always add click handlers if provided, to both polygon and marker
+      if (onHexagonClick) {
+        hexPolygon.on('click', () => onHexagonClick(hex.index));
+        if (marker) {
+          marker.on('click', () => onHexagonClick(hex.index));
+        }
       }
     });
 
