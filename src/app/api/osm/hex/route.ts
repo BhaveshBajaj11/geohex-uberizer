@@ -78,7 +78,8 @@ export async function POST(req: Request) {
       // Note: Rely on platform default timeout; Overpass sometimes slow
     });
     if (!resp.ok) {
-      return NextResponse.json({ hexIndex, polylines: [], totalMeters: 0 });
+      console.error(`❌ OSM API failed for hex ${hexIndex}: ${resp.status} ${resp.statusText}`);
+      return NextResponse.json({ hexIndex, polylines: [], totalMeters: 0, error: `API failed: ${resp.status}` });
     }
     const json = await resp.json();
     console.log('=== OSM API Response Debug ===');

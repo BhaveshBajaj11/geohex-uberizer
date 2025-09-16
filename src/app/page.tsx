@@ -1,7 +1,7 @@
 
 'use client';
 
-import {useState, useEffect, useRef} from 'react';
+import {useState, useEffect, useRef, useMemo} from 'react';
 import type {LatLngLiteral} from 'leaflet';
 import {cellToBoundary, polygonToCellsExperimental} from 'h3-js';
 import {Layers} from 'lucide-react';
@@ -69,6 +69,7 @@ export default function Home() {
   const inFlightFetchesRef = useRef<Set<string>>(new Set());
   const inFlightPolygonFetchRef = useRef<Set<number>>(new Set());
   const hideOverlayTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const retryFailedFetches = useRef<Map<string, { count: number; lastRetry: number }>>(new Map());
   const [clusterHexIds, setClusterHexIds] = useState<Set<string>>(new Set());
   // New UI state for roads/satellite/measurement
   const [basemap, setBasemap] = useState<'osm' | 'satellite'>('satellite');
@@ -76,6 +77,23 @@ export default function Home() {
   const [measureMode, setMeasureMode] = useState<boolean>(false);
   const [measurePoints, setMeasurePoints] = useState<LatLngLiteral[]>([]);
   const [polygonRoads, setPolygonRoads] = useState<LatLngLiteral[][]>([]);
+  
+  // Compute all roads from both polygon roads and individual hex roads
+  const allRoads = useMemo(() => {
+    const hexRoads = Object.values(roadsForHex).flatMap(hex => hex.polylines);
+    const combined = [...polygonRoads, ...hexRoads];
+    console.log('🛣️ All roads computed:', {
+      polygonRoads: polygonRoads.length,
+      hexRoads: hexRoads.length,
+      total: combined.length,
+      hexRoadsByHex: Object.entries(roadsForHex).map(([hex, data]) => ({
+        hex: hex.slice(-6),
+        polylines: data.polylines.length,
+        totalMeters: data.totalMeters
+      }))
+    });
+    return combined;
+  }, [polygonRoads, roadsForHex]);
   
   // Node clustering state
   const [polygonNodes, setPolygonNodes] = useState<Record<string, NodesInHexResult>>({});
@@ -323,6 +341,111 @@ export default function Home() {
     });
   };
 
+  // Retry mechanism for failed fetches
+  const retryWithBackoff = async (hexIndex: string, fetchFn: () => Promise<any>, maxRetries = 3) => {
+    const retryInfo = retryFailedFetches.current.get(hexIndex) || { count: 0, lastRetry: 0 };
+    const now = Date.now();
+    const backoffMs = Math.min(1000 * Math.pow(2, retryInfo.count), 10000); // Max 10s backoff
+    
+    if (retryInfo.count >= maxRetries || (now - retryInfo.lastRetry) < backoffMs) {
+      return null;
+    }
+    
+    retryInfo.count++;
+    retryInfo.lastRetry = now;
+    retryFailedFetches.current.set(hexIndex, retryInfo);
+    
+    console.log(`🔄 Retrying hex ${hexIndex} (attempt ${retryInfo.count}/${maxRetries})`);
+    return fetchFn();
+  };
+
+  // Function to retry all failed hexagons
+  const retryAllFailedHexagons = async () => {
+    const failedHexes = Array.from(retryFailedFetches.current.keys());
+    console.log(`🔄 Retrying ${failedHexes.length} failed hexagons...`);
+    
+    for (const hexIndex of failedHexes) {
+      try {
+        const res = await getRoadsForHexagon(hexIndex);
+        if (res && res.polylines && res.polylines.length > 0) {
+          setRoadsForHex((prev) => ({
+            ...prev,
+            [hexIndex]: { polylines: res.polylines, totalMeters: res.totalMeters, ts: Date.now() },
+          }));
+          retryFailedFetches.current.delete(hexIndex);
+          console.log(`✅ Successfully retried hex ${hexIndex}`);
+        }
+      } catch (error) {
+        console.error(`❌ Retry failed for hex ${hexIndex}:`, error);
+      }
+    }
+  };
+
+  // Function to debug specific hexagons
+  const debugSpecificHexagons = async () => {
+    const problematicHexes = ['8a603601504ffff', '8a6036015a17fff'];
+    console.log(`🔍 Debugging specific hexagons: ${problematicHexes.join(', ')}`);
+    
+    for (const hexIndex of problematicHexes) {
+      try {
+        console.log(`🔍 Testing hex ${hexIndex}...`);
+        const res = await getRoadsForHexagon(hexIndex);
+        console.log(`📊 Hex ${hexIndex} result:`, {
+          polylines: res.polylines?.length || 0,
+          totalMeters: res.totalMeters || 0,
+          error: res.error || 'none'
+        });
+        
+        if (res.polylines && res.polylines.length > 0) {
+          setRoadsForHex((prev) => ({
+            ...prev,
+            [hexIndex]: { polylines: res.polylines, totalMeters: res.totalMeters, ts: Date.now() },
+          }));
+          console.log(`✅ Successfully loaded roads for hex ${hexIndex}`);
+        } else {
+          console.log(`⚠️ No roads found for hex ${hexIndex}`);
+        }
+      } catch (error) {
+        console.error(`❌ Error testing hex ${hexIndex}:`, error);
+      }
+    }
+  };
+
+  // Function to load roads for all selected hexagons
+  const loadAllSelectedHexagonRoads = async () => {
+    const selectedHexes = Array.from(selectedH3Indexes);
+    console.log(`🛣️ Loading roads for ${selectedHexes.length} selected hexagons...`);
+    
+    for (const hexIndex of selectedHexes) {
+      if (inFlightFetchesRef.current.has(hexIndex)) continue;
+      
+      try {
+        inFlightFetchesRef.current.add(hexIndex);
+        const res = await getRoadsForHexagon(hexIndex);
+        
+        if (res.polylines && res.polylines.length > 0) {
+          setRoadsForHex((prev) => {
+            const updated = {
+              ...prev,
+              [hexIndex]: { polylines: res.polylines, totalMeters: res.totalMeters, ts: Date.now() },
+            };
+            console.log(`✅ Loaded ${res.polylines.length} road segments for hex ${hexIndex}`, {
+              totalHexes: Object.keys(updated).length,
+              totalRoads: Object.values(updated).reduce((sum, data) => sum + data.polylines.length, 0)
+            });
+            return updated;
+          });
+        } else {
+          console.log(`⚠️ No roads found for hex ${hexIndex}`);
+        }
+      } catch (error) {
+        console.error(`❌ Failed to load roads for hex ${hexIndex}:`, error);
+      } finally {
+        inFlightFetchesRef.current.delete(hexIndex);
+      }
+    }
+  };
+
   const handleHexHover = (index: string | null) => {
     setHoveredHexIndex(index);
     // Graceful hide to avoid flicker when moving cursor quickly
@@ -373,16 +496,29 @@ export default function Home() {
             }
             return total;
           };
-          setRoadsForHex((prev) => ({
-            ...prev,
-            ...Object.fromEntries(owningPolygon.allH3Indexes.map(h => {
+          setRoadsForHex((prev) => {
+            const updates = Object.fromEntries(owningPolygon.allH3Indexes.map(h => {
               const lines = (res[h]?.polylines || []) as LatLngLiteral[][];
               const meters = (res[h]?.totalMeters && res[h]?.totalMeters > 0) ? res[h]!.totalMeters : computeTotal(lines);
               return [h, { polylines: lines, totalMeters: meters, ts: Date.now() }];
-            }))
-          }));
+            }));
+            const updated = { ...prev, ...updates };
+            console.log(`🛣️ Updated roadsForHex for polygon ${owningPolygon.id}:`, {
+              hexes: Object.keys(updates).length,
+              totalRoads: Object.values(updates).reduce((sum, data) => sum + data.polylines.length, 0),
+              totalHexes: Object.keys(updated).length
+            });
+            return updated;
+          });
         })
-        .catch(() => {})
+        .catch((error) => {
+          console.error(`❌ Failed to fetch roads for polygon ${owningPolygon.id}:`, error);
+          // Mark all hexes in this polygon as failed for potential retry
+          owningPolygon.allH3Indexes.forEach(hexIndex => {
+            const retryInfo = retryFailedFetches.current.get(hexIndex) || { count: 0, lastRetry: 0 };
+            retryFailedFetches.current.set(hexIndex, retryInfo);
+          });
+        })
         .finally(() => {
           inFlightPolygonFetchRef.current.delete(owningPolygon.id);
         });
@@ -418,16 +554,45 @@ export default function Home() {
         };
         const polylines = (res.polylines || []) as LatLngLiteral[][];
         const totalMeters = res.totalMeters && res.totalMeters > 0 ? res.totalMeters : computeTotal(polylines);
-        setRoadsForHex((prev) => ({
-          ...prev,
-          [index]: { polylines, totalMeters, ts: Date.now() },
-        }));
+        setRoadsForHex((prev) => {
+          const updated = {
+            ...prev,
+            [index]: { polylines, totalMeters, ts: Date.now() },
+          };
+          console.log(`🛣️ Updated roadsForHex for hex ${index}:`, {
+            polylines: polylines.length,
+            totalMeters,
+            totalHexes: Object.keys(updated).length
+          });
+          return updated;
+        });
       })
-      .catch(() => {
+      .catch((error) => {
+        console.error(`❌ Failed to fetch roads for hex ${index}:`, error);
         setRoadsForHex((prev) => ({
           ...prev,
           [index]: { polylines: [], totalMeters: 0, ts: Date.now() },
         }));
+        // Schedule a retry if this was a network error
+        if (error.message?.includes('Failed to fetch') || error.message?.includes('API failed')) {
+          setTimeout(() => {
+            retryWithBackoff(index, () => getRoadsForHexagon(index))
+              ?.then((res) => {
+                if (res) {
+                  const polylines = (res.polylines || []) as LatLngLiteral[][];
+                  const totalMeters = res.totalMeters || 0;
+                  setRoadsForHex((prev) => ({
+                    ...prev,
+                    [index]: { polylines, totalMeters, ts: Date.now() },
+                  }));
+                  console.log(`✅ Retry successful for hex ${index}`);
+                }
+              })
+              .catch((retryError) => {
+                console.error(`❌ Retry failed for hex ${index}:`, retryError);
+              });
+          }, 2000); // Wait 2 seconds before retry
+        }
       })
       .finally(() => {
         inFlightFetchesRef.current.delete(index);
@@ -783,6 +948,34 @@ export default function Home() {
                   onClick={() => setMeasurePoints([])}
                 >Clear Points</button>
               )}
+              <div className="w-px h-4 bg-white/30 mx-2" />
+              <button
+                className="text-xs px-2 py-1 rounded bg-orange-600 hover:bg-orange-700"
+                onClick={retryAllFailedHexagons}
+                title="Retry failed road fetches"
+              >Retry Roads</button>
+              <button
+                className="text-xs px-2 py-1 rounded bg-purple-600 hover:bg-purple-700 ml-2"
+                onClick={debugSpecificHexagons}
+                title="Debug specific failing hexagons"
+              >Debug Hexes</button>
+              <button
+                className="text-xs px-2 py-1 rounded bg-blue-600 hover:bg-blue-700 ml-2"
+                onClick={loadAllSelectedHexagonRoads}
+                title="Load roads for all selected hexagons"
+                disabled={selectedH3Indexes.size === 0}
+              >Load All Roads</button>
+              <button
+                className="text-xs px-2 py-1 rounded bg-green-600 hover:bg-green-700 ml-2"
+                onClick={() => {
+                  console.log('🔄 Force refreshing map...');
+                  setMapKey(prev => prev + 1);
+                }}
+                title="Force refresh map"
+              >Refresh Map</button>
+              <div className="text-xs text-white/80 ml-2">
+                Roads: {allRoads.length} | Hexes: {Object.keys(roadsForHex).length}
+              </div>
             </div>
           </div>
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -1078,7 +1271,7 @@ export default function Home() {
             selectedHexagonsForSchedule={selectedHexagonsForSchedule}
             onHexagonClick={undefined}
             editingHexagonId={editingHexagonId}
-            roads={polygonRoads}
+            roads={allRoads}
             onHexagonHover={undefined}
             clusterHexIds={clusterHexIds}
             hoveredHexLengthMeters={undefined}

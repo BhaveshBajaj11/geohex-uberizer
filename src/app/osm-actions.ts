@@ -2,7 +2,7 @@
 import * as turf from '@turf/turf';
 
 export type LatLng = { lat: number; lng: number };
-export type RoadsInHexResult = { hexIndex: string; polylines: LatLng[][]; totalMeters: number };
+export type RoadsInHexResult = { hexIndex: string; polylines: LatLng[][]; totalMeters: number; error?: string };
 
 // Node and clustering types
 export type OSMNode = {

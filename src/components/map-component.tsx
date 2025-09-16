@@ -251,18 +251,40 @@ export default function MapComponent({
     const rGroup = roadsGroup.current;
     if (!rGroup) return;
     rGroup.clearLayers();
+    
+    console.log('🗺️ MapComponent received roads:', {
+      roadsCount: roads?.length || 0,
+      roads: roads?.map((road, i) => ({
+        index: i,
+        points: road?.length || 0,
+        firstPoint: road?.[0],
+        lastPoint: road?.[road.length - 1]
+      }))
+    });
+    
     if (roads && roads.length > 0) {
-      roads.forEach((line) => {
+      let renderedCount = 0;
+      roads.forEach((line, index) => {
         if (line && line.length > 1) {
-          L.polyline(line as LatLngExpression[], {
-            color: '#f97316',
-            weight: 3,
-            opacity: 0.9,
-            interactive: false,
-            bubblingMouseEvents: false,
-          }).addTo(rGroup);
+          try {
+            L.polyline(line as LatLngExpression[], {
+              color: '#f97316',
+              weight: 3,
+              opacity: 0.9,
+              interactive: false,
+              bubblingMouseEvents: false,
+            }).addTo(rGroup);
+            renderedCount++;
+          } catch (error) {
+            console.error(`❌ Failed to render road ${index}:`, error, line);
+          }
+        } else {
+          console.warn(`⚠️ Skipping invalid road ${index}:`, line);
         }
       });
+      console.log(`✅ Rendered ${renderedCount} roads out of ${roads.length} total`);
+    } else {
+      console.log('⚠️ No roads to render');
     }
   }, [roads]);
 

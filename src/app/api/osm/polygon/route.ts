@@ -63,7 +63,8 @@ export async function POST(req: Request) {
     });
 
     if (!resp.ok) {
-      return NextResponse.json({ hexes: {} });
+      console.error(`❌ OSM API failed for polygon: ${resp.status} ${resp.statusText}`);
+      return NextResponse.json({ hexes: {}, error: `API failed: ${resp.status}` });
     }
 
     const json = await resp.json();
