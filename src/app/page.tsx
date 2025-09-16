@@ -1,7 +1,7 @@
 
 'use client';
 
-import {useState, useEffect} from 'react';
+import {useState, useEffect, useRef} from 'react';
 import type {LatLngLiteral} from 'leaflet';
 import {cellToBoundary, polygonToCellsExperimental} from 'h3-js';
 import {Layers} from 'lucide-react';
@@ -19,10 +19,12 @@ import {useToast} from '@/hooks/use-toast';
 import {Skeleton} from '@/components/ui/skeleton';
 import PolygonList from '@/components/polygon-list';
 import ScheduleTab from '@/components/scheduling/schedule-tab';
+import { NodeClusterVisualizer } from '@/components/node-cluster-visualizer';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { HexagonSchedule, ScheduledHexagon } from '@/types/scheduling';
 import { generateTimeSlots, getNextAvailableTimeSlot, generateScheduleId, getHexagonNumber, createCustomTimeSlot } from '@/lib/scheduling-utils';
 import { getHexagonsForTerminal } from './actions';
+import { getRoadsForHexagon, prefetchRoadsForHexagons, getRoadsForPolygon, getNodesForPolygon, getNodesForHexagon, getNodePathsForPolygon, testDistanceCalculation, type NodesInHexResult, type NodeCluster, type NodePath, type NodeJoiningResult } from './osm-actions';
 
 const MapComponent = dynamic(() => import('@/components/map-component'), {
   ssr: false,
@@ -62,6 +64,30 @@ export default function Home() {
   const [terminalHexagons, setTerminalHexagons] = useState<string[]>([]);
   const [isTimeInputOpen, setIsTimeInputOpen] = useState<boolean>(false);
   const [editingHexagonId, setEditingHexagonId] = useState<string | null>(null);
+  const [roadsForHex, setRoadsForHex] = useState<Record<string, { polylines: LatLngLiteral[][]; totalMeters: number; ts: number }>>({});
+  const [activeRoadsHexId, setActiveRoadsHexId] = useState<string | null>(null);
+  const inFlightFetchesRef = useRef<Set<string>>(new Set());
+  const inFlightPolygonFetchRef = useRef<Set<number>>(new Set());
+  const hideOverlayTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [clusterHexIds, setClusterHexIds] = useState<Set<string>>(new Set());
+  // New UI state for roads/satellite/measurement
+  const [basemap, setBasemap] = useState<'osm' | 'satellite'>('satellite');
+  const [showHexagons, setShowHexagons] = useState<boolean>(false);
+  const [measureMode, setMeasureMode] = useState<boolean>(false);
+  const [measurePoints, setMeasurePoints] = useState<LatLngLiteral[]>([]);
+  const [polygonRoads, setPolygonRoads] = useState<LatLngLiteral[][]>([]);
+  
+  // Node clustering state
+  const [polygonNodes, setPolygonNodes] = useState<Record<string, NodesInHexResult>>({});
+  const [allClusters, setAllClusters] = useState<NodeCluster[]>([]);
+  const [showNodes, setShowNodes] = useState<boolean>(false);
+  const [nodesLoading, setNodesLoading] = useState<boolean>(false);
+  
+  // Node paths state
+  const [polygonNodePaths, setPolygonNodePaths] = useState<Record<string, NodeJoiningResult>>({});
+  const [allNodePaths, setAllNodePaths] = useState<NodePath[]>([]);
+  const [showNodePaths, setShowNodePaths] = useState<boolean>(false);
+  const [nodePathsLoading, setNodePathsLoading] = useState<boolean>(false);
 
   useEffect(() => {
     // Update map hexagons when selection changes
@@ -76,10 +102,17 @@ export default function Home() {
     setRenderedHexagons(selectedHexagons);
   }, [selectedH3Indexes]);
 
+  // Prefetch roads and lengths after polygons/hexes load, with limited concurrency
+  // Disable old prefetch flow to reduce requests; polygon batch fetch is used on submit
+  // useEffect(() => {}, [selectedH3Indexes]);
+
   const handlePolygonSubmit = (data: {wkts: string[]; resolution: number; terminalId?: string}) => {
     let totalHexagons = 0;
     const newPolygonsData: PolygonData[] = [];
     const newH3Indexes: string[] = [];
+
+    const perPolygonHexIndexes: string[][] = [];
+    const perPolygonLeaflet: LeafletPolygon[] = [];
 
     data.wkts.forEach((wktString, i) => {
       try {
@@ -128,6 +161,8 @@ export default function Home() {
         };
         newPolygonsData.push(newPolygonData);
         newH3Indexes.push(...h3Indexes);
+        perPolygonHexIndexes.push(h3Indexes);
+        perPolygonLeaflet.push(newLeafletPolygon);
 
       } catch (error) {
         console.error(`Error processing WKT string #${i + 1}:`, wktString, error);
@@ -157,12 +192,100 @@ export default function Home() {
       setSelectedHexagonsForSchedule(new Set());
       setScheduledHexagons([]);
       
+      // Clear previous node data
+      setPolygonNodes({});
+      setAllClusters([]);
+      setShowNodes(false);
+      
+      // Clear previous node paths data
+      setPolygonNodePaths({});
+      setAllNodePaths([]);
+      setShowNodePaths(false);
+      
       // Switch to polygons tab if currently on schedules
       if (activeTab === 'schedules') {
         setActiveTab('polygons');
       }
 
       setMapKey(Date.now());
+
+      // Batch fetch roads and nodes once per polygon and split per hex to prime cache
+      perPolygonHexIndexes.forEach(async (hexes, idx) => {
+        if (hexes.length === 0) return;
+        try {
+          // Fetch roads
+          const res = await getRoadsForPolygon(perPolygonLeaflet[idx], hexes);
+          setRoadsForHex(prev => ({
+            ...prev,
+            ...Object.fromEntries(hexes.map(h => [h, { polylines: (res[h]?.polylines || []) as LatLngLiteral[][], totalMeters: res[h]?.totalMeters || 0, ts: Date.now() }]))
+          }));
+          // Aggregate all roads across hexes to display for the whole polygon
+          const lines = Object.values(res).flatMap(v => (v?.polylines || [])) as LatLngLiteral[][];
+          setPolygonRoads(prev => [...prev, ...lines]);
+          
+          // Fetch nodes and clusters
+          setNodesLoading(true);
+          console.log('Fetching nodes for polygon', idx, 'with hexes:', hexes.length);
+          const nodesRes = await getNodesForPolygon(perPolygonLeaflet[idx], hexes);
+          console.log('Nodes response:', nodesRes);
+          console.log('Raw response structure:', Object.keys(nodesRes));
+          
+          // Update polygon nodes
+          setPolygonNodes(prev => {
+            const updated = { ...prev, ...nodesRes };
+            console.log('Updated polygon nodes keys:', Object.keys(updated));
+            
+            // Aggregate all clusters from ALL polygon nodes (not just this polygon)
+            const allClusters = Object.values(updated).flatMap(nodeResult => {
+              console.log('Processing hex result:', nodeResult.hexIndex, 'clusters:', nodeResult.clusters.length);
+              return nodeResult.clusters;
+            });
+            console.log('Total clusters found:', allClusters.length);
+            setAllClusters(allClusters);
+            
+            return updated;
+          });
+          
+          setNodesLoading(false);
+          
+          // Fetch node paths for the polygon
+          setNodePathsLoading(true);
+          try {
+            console.log('Fetching node paths for polygon', idx, 'with hexes:', hexes.length);
+            const nodePathsRes = await getNodePathsForPolygon(perPolygonLeaflet[idx], hexes);
+            console.log('Node paths response:', nodePathsRes);
+            
+            // Update polygon node paths
+            setPolygonNodePaths(prev => {
+              const updated = { ...prev, ...nodePathsRes };
+              
+              // Aggregate all paths from ALL polygon node paths
+              const allPaths = Object.values(updated).flatMap(nodePathResult => {
+                console.log('Processing hex node paths result:', nodePathResult.hexIndex, 'paths:', nodePathResult.paths.length);
+                return nodePathResult.paths;
+              });
+              console.log('Total node paths found:', allPaths.length);
+              setAllNodePaths(allPaths);
+              
+              return updated;
+            });
+            
+            setNodePathsLoading(false);
+          } catch (err) {
+            console.error('Error fetching node paths:', err);
+            setNodePathsLoading(false);
+          }
+        } catch (err) {
+          console.error('Error fetching polygon data:', err);
+          setNodesLoading(false);
+        }
+      });
+
+      // Switch to satellite basemap and show roads by default when polygons are added
+      setBasemap('satellite');
+      setShowHexagons(false);
+      setMeasureMode(false);
+      setMeasurePoints([]);
 
       // Set the terminal ID if provided
       if (data.terminalId) {
@@ -202,6 +325,113 @@ export default function Home() {
 
   const handleHexHover = (index: string | null) => {
     setHoveredHexIndex(index);
+    // Graceful hide to avoid flicker when moving cursor quickly
+    if (!index) {
+      if (hideOverlayTimerRef.current) clearTimeout(hideOverlayTimerRef.current);
+      hideOverlayTimerRef.current = setTimeout(() => setActiveRoadsHexId(null), 300);
+      return;
+    }
+    if (hideOverlayTimerRef.current) {
+      clearTimeout(hideOverlayTimerRef.current);
+      hideOverlayTimerRef.current = null;
+    }
+    setActiveRoadsHexId(index);
+
+    const cached = roadsForHex[index];
+    const now = Date.now();
+    const ttlMs = 60_000; // 1 minute TTL for refresh
+    // Always refetch immediately if cache is empty; otherwise refresh after TTL
+    const shouldFetch = !cached || cached.polylines.length === 0 || (now - cached.ts > ttlMs);
+    if (!shouldFetch) return;
+
+    // Prefer fetching once per polygon and splitting per hex
+    const owningPolygon = polygons.find(p => p.allH3Indexes.includes(index));
+    if (owningPolygon) {
+      if (inFlightPolygonFetchRef.current.has(owningPolygon.id)) return;
+      inFlightPolygonFetchRef.current.add(owningPolygon.id);
+      getRoadsForPolygon(owningPolygon.leafletPolygon, owningPolygon.allH3Indexes)
+        .then((res) => {
+          const computeHaversine = (a: LatLngLiteral, b: LatLngLiteral) => {
+            const R = 6371000;
+            const toRad = (x: number) => (x * Math.PI) / 180;
+            const dLat = toRad(b.lat - a.lat);
+            const dLon = toRad(b.lng - a.lng);
+            const lat1 = toRad(a.lat);
+            const lat2 = toRad(b.lat);
+            const sinDLat = Math.sin(dLat / 2);
+            const sinDLon = Math.sin(dLon / 2);
+            const h = sinDLat * sinDLat + Math.cos(lat1) * Math.cos(lat2) * sinDLon * sinDLon;
+            const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+            return R * c;
+          };
+          const computeTotal = (lines: LatLngLiteral[][]) => {
+            let total = 0;
+            for (const line of lines) {
+              for (let i = 1; i < line.length; i++) {
+                total += computeHaversine(line[i - 1], line[i]);
+              }
+            }
+            return total;
+          };
+          setRoadsForHex((prev) => ({
+            ...prev,
+            ...Object.fromEntries(owningPolygon.allH3Indexes.map(h => {
+              const lines = (res[h]?.polylines || []) as LatLngLiteral[][];
+              const meters = (res[h]?.totalMeters && res[h]?.totalMeters > 0) ? res[h]!.totalMeters : computeTotal(lines);
+              return [h, { polylines: lines, totalMeters: meters, ts: Date.now() }];
+            }))
+          }));
+        })
+        .catch(() => {})
+        .finally(() => {
+          inFlightPolygonFetchRef.current.delete(owningPolygon.id);
+        });
+      return;
+    }
+
+    // Fallback: fetch for the single hex if we can't map it to a polygon
+    if (inFlightFetchesRef.current.has(index)) return;
+    inFlightFetchesRef.current.add(index);
+    getRoadsForHexagon(index)
+      .then((res) => {
+        const computeHaversine = (a: LatLngLiteral, b: LatLngLiteral) => {
+          const R = 6371000;
+          const toRad = (x: number) => (x * Math.PI) / 180;
+          const dLat = toRad(b.lat - a.lat);
+          const dLon = toRad(b.lng - a.lng);
+          const lat1 = toRad(a.lat);
+          const lat2 = toRad(b.lat);
+          const sinDLat = Math.sin(dLat / 2);
+          const sinDLon = Math.sin(dLon / 2);
+          const h = sinDLat * sinDLat + Math.cos(lat1) * Math.cos(lat2) * sinDLon * sinDLon;
+          const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+          return R * c;
+        };
+        const computeTotal = (lines: LatLngLiteral[][]) => {
+          let total = 0;
+          for (const line of lines) {
+            for (let i = 1; i < line.length; i++) {
+              total += computeHaversine(line[i - 1], line[i]);
+            }
+          }
+          return total;
+        };
+        const polylines = (res.polylines || []) as LatLngLiteral[][];
+        const totalMeters = res.totalMeters && res.totalMeters > 0 ? res.totalMeters : computeTotal(polylines);
+        setRoadsForHex((prev) => ({
+          ...prev,
+          [index]: { polylines, totalMeters, ts: Date.now() },
+        }));
+      })
+      .catch(() => {
+        setRoadsForHex((prev) => ({
+          ...prev,
+          [index]: { polylines: [], totalMeters: 0, ts: Date.now() },
+        }));
+      })
+      .finally(() => {
+        inFlightFetchesRef.current.delete(index);
+      });
   };
 
   const handleRemovePolygon = (polygonId: number) => {
@@ -236,6 +466,17 @@ export default function Home() {
     setSchedules([]);
     setSelectedHexagonsForSchedule(new Set());
     setScheduledHexagons([]);
+    setPolygonRoads([]);
+    setPolygonNodes({});
+    setAllClusters([]);
+    setShowNodes(false);
+    setPolygonNodePaths({});
+    setAllNodePaths([]);
+    setShowNodePaths(false);
+    setBasemap('osm');
+    setShowHexagons(false);
+    setMeasureMode(false);
+    setMeasurePoints([]);
     
     // Switch back to polygons tab if currently on schedules
     if (activeTab === 'schedules') {
@@ -483,12 +724,75 @@ export default function Home() {
           </div>
         </ResizableSidebarHeader>
         <ResizableSidebarContent>
+          <div className="px-2 pt-2">
+            <div className="rounded-md bg-black/70 text-white border border-white/20 px-3 py-2 shadow flex items-center gap-2">
+              <label className="text-xs mr-1">Basemap</label>
+              <button
+                className={`text-xs px-2 py-1 rounded ${basemap === 'osm' ? 'bg-gray-700' : 'bg-gray-800 hover:bg-gray-700'}`}
+                onClick={() => setBasemap('osm')}
+              >OSM</button>
+              <button
+                className={`text-xs px-2 py-1 rounded ${basemap === 'satellite' ? 'bg-gray-700' : 'bg-gray-800 hover:bg-gray-700'}`}
+                onClick={() => setBasemap('satellite')}
+              >Satellite</button>
+              <div className="w-px h-4 bg-white/30 mx-2" />
+              <label className="text-xs">Nodes</label>
+              <button
+                className={`text-xs px-2 py-1 rounded ${
+                  nodesLoading ? 'bg-blue-600' : 
+                  showNodes ? 'bg-purple-600' : 
+                  Object.keys(polygonNodes).length === 0 ? 'bg-gray-600 opacity-50' : 'bg-gray-800 hover:bg-gray-700'
+                }`}
+                onClick={() => setShowNodes((n) => !n)}
+                disabled={Object.keys(polygonNodes).length === 0 && !nodesLoading}
+                title={
+                  nodesLoading ? 'Loading nodes...' :
+                  Object.keys(polygonNodes).length === 0 ? 'No node data - draw a polygon first' :
+                  `${Object.values(polygonNodes).reduce((sum, n) => sum + n.totalNodes, 0)} nodes, ${allClusters.length} clusters available`
+                }
+              >
+                {nodesLoading ? 'Loading...' : showNodes ? 'On' : 'Off'}
+              </button>
+              <div className="w-px h-4 bg-white/30 mx-2" />
+              <label className="text-xs">Paths</label>
+              <button
+                className={`text-xs px-2 py-1 rounded ${
+                  nodePathsLoading ? 'bg-blue-600' : 
+                  showNodePaths ? 'bg-green-600' : 
+                  Object.keys(polygonNodePaths).length === 0 ? 'bg-gray-600 opacity-50' : 'bg-gray-800 hover:bg-gray-700'
+                }`}
+                onClick={() => setShowNodePaths((p) => !p)}
+                disabled={Object.keys(polygonNodePaths).length === 0 && !nodePathsLoading}
+                title={
+                  nodePathsLoading ? 'Loading node paths...' :
+                  Object.keys(polygonNodePaths).length === 0 ? 'No node paths data - draw a polygon first' :
+                  `${allNodePaths.length} total paths, ${allNodePaths.filter(p => p.pathType === 'optimal').length} optimal (225-270m)`
+                }
+              >
+                {nodePathsLoading ? 'Loading...' : showNodePaths ? 'On' : 'Off'}
+              </button>
+              <div className="w-px h-4 bg-white/30 mx-2" />
+              <label className="text-xs">Measure</label>
+              <button
+                className={`text-xs px-2 py-1 rounded ${measureMode ? 'bg-emerald-600' : 'bg-gray-800 hover:bg-gray-700'}`}
+                onClick={() => setMeasureMode((m) => !m)}
+              >{measureMode ? 'On' : 'Off'}</button>
+              {measureMode && measurePoints.length > 0 && (
+                <button
+                  className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 ml-2"
+                  onClick={() => setMeasurePoints([])}
+                >Clear Points</button>
+              )}
+            </div>
+          </div>
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid w-full grid-cols-2 mx-2 mt-2">
+            <TabsList className="grid w-full grid-cols-4 mx-2 mt-2">
               <TabsTrigger value="input">Input</TabsTrigger>
               <TabsTrigger value="schedules" disabled={availableHexagons.length === 0}>
                 Schedule Routes ({Math.max(0, availableHexagons.length - scheduledHexagons.length)})
               </TabsTrigger>
+              <TabsTrigger value="nodes">Node Analysis</TabsTrigger>
+              <TabsTrigger value="paths">Node Paths</TabsTrigger>
             </TabsList>
             
             <TabsContent value="input" className="mt-4">
@@ -527,6 +831,236 @@ export default function Home() {
                 onEditHexagonChange={(hexId) => setEditingHexagonId(hexId)}
               />
             </TabsContent>
+            
+            <TabsContent value="nodes" className="mt-4">
+              <div className="space-y-4">
+                {polygons.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    Create a polygon first to see node analysis
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* Summary for entire polygon */}
+                    <div className="bg-white rounded-lg border p-4">
+                      <h3 className="font-semibold mb-2">Polygon Node Analysis</h3>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>Total Hexagons: <span className="font-medium">{Array.from(selectedH3Indexes).length}</span></div>
+                        <div>Total Nodes: <span className="font-medium">{Object.values(polygonNodes).reduce((sum, n) => sum + n.totalNodes, 0)}</span></div>
+                        <div>Total Segments: <span className="font-medium">{Object.values(polygonNodes).reduce((sum, n) => sum + n.segments.length, 0)}</span></div>
+                        <div>Optimal Clusters: <span className="font-medium text-green-600">{allClusters.length}</span></div>
+                      </div>
+                      {nodesLoading && (
+                        <div className="mt-2 text-sm text-blue-600">Loading node data...</div>
+                      )}
+                      {!nodesLoading && allClusters.length === 0 && Object.keys(polygonNodes).length > 0 && (
+                        <div className="mt-2 text-sm text-yellow-600">
+                          No optimal clusters found in this area. Try a more road-dense location.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Cluster list */}
+                    {allClusters.length > 0 && (
+                      <div className="space-y-2">
+                        <h4 className="font-medium">
+                          Found {allClusters.filter(c => c.totalLengthMeters >= 225 && c.totalLengthMeters <= 270).length} optimal clusters + {allClusters.filter(c => c.totalLengthMeters < 225).length} sub-optimal
+                        </h4>
+                        <div className="grid gap-2 max-h-96 overflow-y-auto">
+                          {allClusters.map((cluster, index) => {
+                            const isOptimal = cluster.totalLengthMeters >= 225 && cluster.totalLengthMeters <= 270;
+                            return (
+                              <div key={cluster.id} className="bg-gray-50 rounded p-3 text-sm">
+                                <div className="flex justify-between items-center mb-1">
+                                  <span className="font-medium">Cluster {index + 1}</span>
+                                  <span className={`px-2 py-1 rounded text-xs ${
+                                    isOptimal ? 'bg-green-100 text-green-800' : 
+                                    cluster.totalLengthMeters > 270 ? 'bg-red-100 text-red-800' :
+                                    'bg-yellow-100 text-yellow-800'
+                                  }`}>
+                                    {Math.round(cluster.totalLengthMeters)}m {isOptimal ? '✅' : cluster.totalLengthMeters < 225 ? '⚠️' : '❌'}
+                                  </span>
+                                </div>
+                                <div className="text-gray-600">
+                                  {cluster.nodes.length} nodes • {cluster.segments.length} segments
+                                </div>
+                                <div className="text-xs text-gray-500 mt-1">
+                                  Center: {cluster.centroid.lat.toFixed(6)}, {cluster.centroid.lng.toFixed(6)}
+                                </div>
+                                <div className="text-xs mt-1">
+                                  {isOptimal ? 'Perfect for 15-min delivery' : 
+                                   cluster.totalLengthMeters < 225 ? 'Too short for optimal delivery' :
+                                   'Too long for single 15-min interval'}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Debug section */}
+                    <div className="bg-yellow-50 border border-yellow-200 rounded p-4">
+                      <h4 className="font-medium text-yellow-800 mb-2">Debug Info</h4>
+                      <div className="text-xs space-y-1">
+                        <div>Polygons: {polygons.length}</div>
+                        <div>Selected hexes: {Array.from(selectedH3Indexes).length}</div>
+                        <div>Node results: {Object.keys(polygonNodes).length}</div>
+                        <div>All clusters: {allClusters.length}</div>
+                        <div>Button disabled: {(allClusters.length === 0 && !nodesLoading) ? 'Yes' : 'No'}</div>
+                        <div>Loading: {nodesLoading ? 'Yes' : 'No'}</div>
+                        {Object.keys(polygonNodes).length > 0 && (
+                          <div className="mt-2 p-2 bg-white rounded text-xs">
+                            <div className="font-medium">Per-hex clusters:</div>
+                            {Object.entries(polygonNodes).map(([hexId, result]) => (
+                              <div key={hexId}>{hexId.slice(-6)}: {result.clusters.length} clusters</div>
+                            ))}
+                          </div>
+                        )}
+                        <button 
+                          onClick={async () => {
+                            try {
+                              console.log('Testing nodes API...');
+                              const testHex = '8a2a1072b59ffff'; // Example hex
+                              const result = await getNodesForHexagon(testHex);
+                              console.log('Test result:', result);
+                              alert(`Test successful! Found ${result.clusters.length} clusters`);
+                            } catch (err) {
+                              console.error('Test failed:', err);
+                              alert('Test failed - check console');
+                            }
+                          }}
+                          className="mt-2 px-2 py-1 bg-yellow-500 text-white rounded text-xs"
+                        >
+                          Test Nodes API
+                        </button>
+                        <button 
+                          onClick={() => {
+                            console.log('Testing distance calculation...');
+                            testDistanceCalculation();
+                            alert('Check console for test results');
+                          }}
+                          className="mt-2 ml-2 px-2 py-1 bg-blue-500 text-white rounded text-xs"
+                        >
+                          Test Distance Calc
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Fallback to manual hex input */}
+                    <details className="bg-gray-50 rounded p-4">
+                      <summary className="cursor-pointer font-medium">Manual Hex Analysis</summary>
+                      <div className="mt-2">
+                        <NodeClusterVisualizer />
+                      </div>
+                    </details>
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+            
+            <TabsContent value="paths" className="mt-4">
+              <div className="space-y-4">
+                {polygons.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    Create a polygon first to see node paths analysis
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* Summary for entire polygon */}
+                    <div className="bg-white rounded-lg border p-4">
+                      <h3 className="font-semibold mb-2">Node Paths Analysis</h3>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>Total Hexagons: <span className="font-medium">{Array.from(selectedH3Indexes).length}</span></div>
+                        <div>Total Paths: <span className="font-medium">{allNodePaths.length}</span></div>
+                        <div>Optimal Paths (225-270m): <span className="font-medium text-green-600">{allNodePaths.filter(p => p.pathType === 'optimal').length}</span></div>
+                        <div>Suboptimal Paths: <span className="font-medium text-yellow-600">{allNodePaths.filter(p => p.pathType !== 'optimal').length}</span></div>
+                      </div>
+                      {nodePathsLoading && (
+                        <div className="mt-2 text-sm text-blue-600">Loading node paths data...</div>
+                      )}
+                      {!nodePathsLoading && allNodePaths.length === 0 && Object.keys(polygonNodePaths).length > 0 && (
+                        <div className="mt-2 text-sm text-yellow-600">
+                          No node paths found in this area. Try a more road-dense location.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Path list */}
+                    {allNodePaths.length > 0 && (
+                      <div className="space-y-2">
+                        <h4 className="font-medium">
+                          Found {allNodePaths.filter(p => p.pathType === 'optimal').length} optimal paths + {allNodePaths.filter(p => p.pathType !== 'optimal').length} suboptimal
+                        </h4>
+                        <div className="grid gap-2 max-h-96 overflow-y-auto">
+                          {allNodePaths.map((path, index) => {
+                            const isOptimal = path.pathType === 'optimal';
+                            return (
+                              <div key={path.id} className="bg-gray-50 rounded p-3 text-sm">
+                                <div className="flex justify-between items-center mb-1">
+                                  <span className="font-medium">Path {index + 1}</span>
+                                  <span className={`px-2 py-1 rounded text-xs ${
+                                    isOptimal ? 'bg-green-100 text-green-800' : 
+                                    path.pathType === 'too_short' ? 'bg-yellow-100 text-yellow-800' :
+                                    'bg-red-100 text-red-800'
+                                  }`}>
+                                    {Math.round(path.totalLengthMeters)}m {isOptimal ? '✅' : path.pathType === 'too_short' ? '⚠️' : '❌'}
+                                  </span>
+                                </div>
+                                <div className="text-gray-600">
+                                  {path.nodes.length} nodes • {Math.round(path.totalLengthMeters)}m total
+                                </div>
+                                <div className="text-xs text-gray-500 mt-1">
+                                  Start: {path.nodes[0].lat.toFixed(6)}, {path.nodes[0].lng.toFixed(6)}
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  End: {path.nodes[path.nodes.length - 1].lat.toFixed(6)}, {path.nodes[path.nodes.length - 1].lng.toFixed(6)}
+                                </div>
+                                <div className="text-xs mt-1">
+                                  {isOptimal ? 'Perfect for 15-min delivery route' : 
+                                   path.pathType === 'too_short' ? 'Too short for optimal delivery' :
+                                   'Too long for single 15-min interval'}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Debug section */}
+                    <div className="bg-yellow-50 border border-yellow-200 rounded p-4">
+                      <h4 className="font-medium text-yellow-800 mb-2">Debug Info</h4>
+                      <div className="text-xs space-y-1">
+                        <div>Polygons: {polygons.length}</div>
+                        <div>Selected hexes: {Array.from(selectedH3Indexes).length}</div>
+                        <div>Node paths results: {Object.keys(polygonNodePaths).length}</div>
+                        <div>All paths: {allNodePaths.length}</div>
+                        <div>Button disabled: {(allNodePaths.length === 0 && !nodePathsLoading) ? 'Yes' : 'No'}</div>
+                        <div>Loading: {nodePathsLoading ? 'Yes' : 'No'}</div>
+                        {Object.keys(polygonNodePaths).length > 0 && (
+                          <div className="mt-2 p-2 bg-white rounded text-xs">
+                            <div className="font-medium">Per-hex paths:</div>
+                            {Object.entries(polygonNodePaths).map(([hexId, result]) => (
+                              <div key={hexId}>{hexId.slice(-6)}: {result.paths.length} paths ({result.optimalPaths} optimal)</div>
+                            ))}
+                          </div>
+                        )}
+                        <button 
+                          onClick={() => {
+                            console.log('Testing distance calculation...');
+                            testDistanceCalculation();
+                            alert('Check console for test results');
+                          }}
+                          className="mt-2 px-2 py-1 bg-blue-500 text-white rounded text-xs"
+                        >
+                          Test Distance Calculation
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </TabsContent>
           </Tabs>
         </ResizableSidebarContent>
       </ResizableSidebar>
@@ -542,8 +1076,23 @@ export default function Home() {
             hoveredHexIndex={hoveredHexIndex}
             scheduledHexagons={scheduledHexagons}
             selectedHexagonsForSchedule={selectedHexagonsForSchedule}
-            onHexagonClick={activeTab === 'schedules' && (scheduleView === 'create' || scheduleView === 'edit') ? handleMapHexagonClick : undefined}
+            onHexagonClick={undefined}
             editingHexagonId={editingHexagonId}
+            roads={polygonRoads}
+            onHexagonHover={undefined}
+            clusterHexIds={clusterHexIds}
+            hoveredHexLengthMeters={undefined}
+            basemap={basemap}
+            showHexagons={showHexagons}
+            measureMode={measureMode}
+            measurePoints={measurePoints}
+            onMapClickForMeasure={(latlng) => setMeasurePoints((pts) => [...pts, latlng])}
+            onMeasurePointDrag={(index, latlng) => setMeasurePoints((pts) => pts.map((p, i) => i === index ? latlng : p))}
+            clusters={allClusters}
+            showNodes={showNodes}
+            allNodes={Object.values(polygonNodes).flatMap(nodeResult => nodeResult.nodes)}
+            nodePaths={allNodePaths}
+            showNodePaths={showNodePaths}
           />
         </main>
       </ResizableSidebarInset>
