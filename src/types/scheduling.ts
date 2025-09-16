@@ -1,5 +1,5 @@
 export interface TimeSlot {
-  start: string; // "16:30", "16:45", etc.
+  start: string; // "16:00", "16:15", etc.
   end: string;   // "16:45", "17:00", etc.
   isAvailable: boolean;
 }

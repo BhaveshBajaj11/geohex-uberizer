@@ -55,8 +55,8 @@ export default function CustomTimeInput({
 
   const getNextAvailableTime = () => {
     // Find the next available 15-minute slot
-    const allSlots = Array.from({ length: 14 }, (_, i) => {
-      const startMinutes = 16 * 60 + 30 + (i * 15); // 4:30 PM + 15min intervals
+    const allSlots = Array.from({ length: 18 }, (_, i) => {
+      const startMinutes = 16 * 60 + 0 + (i * 15); // 4:00 PM + 15min intervals
       return {
         start: minutesToTime(startMinutes),
         end: minutesToTime(startMinutes + 15),
@@ -186,7 +186,7 @@ export default function CustomTimeInput({
 
         {/* Constraints Info */}
         <div className="text-xs text-muted-foreground space-y-1">
-          <p>• Time must be between 4:30 PM - 8:00 PM</p>
+          <p>• Time must be between 4:00 PM - 8:30 PM</p>
           <p>• Duration: 5 minutes - 2 hours</p>
           <p>• No overlapping with existing slots</p>
         </div>

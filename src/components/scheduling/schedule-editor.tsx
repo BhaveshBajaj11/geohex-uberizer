@@ -178,13 +178,13 @@ export default function ScheduleEditor({
         };
       }
 
-      // Constraint: last end must be <= 20:00
+      // Constraint: last end must be <= 20:30
       const lastEndMinutes = timeToMinutes(updated[updated.length - 1].timeSlot.end);
-      if (lastEndMinutes > timeToMinutes('20:00')) {
+      if (lastEndMinutes > timeToMinutes('20:30')) {
         toast({
           variant: 'destructive',
           title: 'Time exceeds allowed range',
-          description: 'Schedules must fit between 4:30 PM and 8:00 PM.',
+          description: 'Schedules must fit between 4:00 PM and 8:30 PM.',
         });
         return; // do not apply
       }

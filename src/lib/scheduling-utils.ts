@@ -1,14 +1,14 @@
 import type { TimeSlot, ScheduledHexagon, TimeValidationResult } from '@/types/scheduling';
 
 /**
- * Generate 14 time slots from 4:30 PM to 8:00 PM (15-minute intervals)
+ * Generate 18 time slots from 4:00 PM to 8:30 PM (15-minute intervals)
  */
 export const generateTimeSlots = (): TimeSlot[] => {
   const slots: TimeSlot[] = [];
   const startHour = 16; // 4 PM
-  const startMinute = 30; // 4:30 PM
+  const startMinute = 0; // 4:00 PM
   
-  for (let i = 0; i < 14; i++) {
+  for (let i = 0; i < 18; i++) {
     const startMinutes = startMinute + (i * 15);
     const startHourTotal = startHour + Math.floor(startMinutes / 60);
     const startMinuteFinal = startMinutes % 60;
@@ -45,7 +45,7 @@ export const getAvailableTimeSlots = (
 };
 
 /**
- * Format time slot for display (e.g., "4:30 PM - 4:45 PM")
+ * Format time slot for display (e.g., "4:00 PM - 4:15 PM")
  */
 export const formatTimeSlot = (slot: TimeSlot): string => {
   const formatTime = (time: string): string => {
@@ -173,8 +173,8 @@ export const validateCustomTimeSlot = (
   startTime: string,
   durationMinutes: number,
   existingSlots: TimeSlot[],
-  minStartTime: string = '16:30',
-  maxEndTime: string = '20:00'
+  minStartTime: string = '16:00',
+  maxEndTime: string = '20:30'
 ): TimeValidationResult => {
   // Check duration constraints
   if (durationMinutes < 5) {
@@ -235,7 +235,7 @@ export const getNextAvailableTimeSlotWithDuration = (
  */
 export const getLatestEndTime = (scheduledHexagons: ScheduledHexagon[]): string => {
   if (scheduledHexagons.length === 0) {
-    return '16:30'; // Default start time
+    return '16:00'; // Default start time
   }
   
   const sortedHexagons = sortScheduledHexagonsByTime(scheduledHexagons);
