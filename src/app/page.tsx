@@ -24,9 +24,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { HexagonSchedule, ScheduledHexagon } from '@/types/scheduling';
 import { generateTimeSlots, getNextAvailableTimeSlot, generateScheduleId, getHexagonNumber, createCustomTimeSlot } from '@/lib/scheduling-utils';
 import { getHexagonsForTerminal } from './actions';
-import { getRoadsForHexagon, prefetchRoadsForHexagons, getRoadsForPolygon, getNodesForPolygon, getNodesForHexagon, getNodePathsForPolygon, testDistanceCalculation, type NodesInHexResult, type NodeCluster, type NodePath, type NodeJoiningResult } from './osm-actions';
+import { getRoadsForHexagon, prefetchRoadsForHexagons, getRoadsForPolygon, getNodesForPolygon, getNodesForHexagon, testDistanceCalculation, type NodesInHexResult, type NodeCluster, type NodePath, type NodeJoiningResult } from './google-maps-actions';
 
-const MapComponent = dynamic(() => import('@/components/map-component'), {
+const GoogleMapComponent = dynamic(() => import('@/components/google-map-component'), {
   ssr: false,
   loading: () => <Skeleton className="h-full w-full" />,
 });
@@ -71,7 +71,7 @@ export default function Home() {
   const hideOverlayTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [clusterHexIds, setClusterHexIds] = useState<Set<string>>(new Set());
   // New UI state for roads/satellite/measurement
-  const [basemap, setBasemap] = useState<'osm' | 'satellite'>('satellite');
+  const [basemap, setBasemap] = useState<'roadmap' | 'satellite' | 'hybrid' | 'terrain'>('satellite');
   const [showHexagons, setShowHexagons] = useState<boolean>(false);
   const [measureMode, setMeasureMode] = useState<boolean>(false);
   const [measurePoints, setMeasurePoints] = useState<LatLngLiteral[]>([]);
@@ -248,31 +248,24 @@ export default function Home() {
           
           setNodesLoading(false);
           
-          // Fetch node paths for the polygon
+          // Create node paths from existing nodes for Google Maps
           setNodePathsLoading(true);
           try {
-            console.log('Fetching node paths for polygon', idx, 'with hexes:', hexes.length);
-            const nodePathsRes = await getNodePathsForPolygon(perPolygonLeaflet[idx], hexes);
-            console.log('Node paths response:', nodePathsRes);
+            console.log('Creating node paths from existing nodes for polygon', idx);
             
-            // Update polygon node paths
-            setPolygonNodePaths(prev => {
-              const updated = { ...prev, ...nodePathsRes };
-              
-              // Aggregate all paths from ALL polygon node paths
-              const allPaths = Object.values(updated).flatMap(nodePathResult => {
-                console.log('Processing hex node paths result:', nodePathResult.hexIndex, 'paths:', nodePathResult.paths.length);
-                return nodePathResult.paths;
-              });
-              console.log('Total node paths found:', allPaths.length);
-              setAllNodePaths(allPaths);
-              
-              return updated;
-            });
+            // Use existing nodes to create paths
+            const allNodes = Object.values(nodesRes).flatMap(nodeResult => nodeResult.nodes);
+            console.log('Using', allNodes.length, 'nodes for path creation');
+            
+            // Import and use createNodePaths function
+            const { createNodePaths } = await import('./google-maps-actions');
+            const paths = createNodePaths(allNodes, 225, 270);
+            console.log('Created', paths.length, 'node paths');
+            setAllNodePaths(paths);
             
             setNodePathsLoading(false);
           } catch (err) {
-            console.error('Error fetching node paths:', err);
+            console.error('Error creating node paths:', err);
             setNodePathsLoading(false);
           }
         } catch (err) {
@@ -473,7 +466,7 @@ export default function Home() {
     setPolygonNodePaths({});
     setAllNodePaths([]);
     setShowNodePaths(false);
-    setBasemap('osm');
+    setBasemap('roadmap');
     setShowHexagons(false);
     setMeasureMode(false);
     setMeasurePoints([]);
@@ -728,13 +721,21 @@ export default function Home() {
             <div className="rounded-md bg-black/70 text-white border border-white/20 px-3 py-2 shadow flex items-center gap-2">
               <label className="text-xs mr-1">Basemap</label>
               <button
-                className={`text-xs px-2 py-1 rounded ${basemap === 'osm' ? 'bg-gray-700' : 'bg-gray-800 hover:bg-gray-700'}`}
-                onClick={() => setBasemap('osm')}
-              >OSM</button>
+                className={`text-xs px-2 py-1 rounded ${basemap === 'roadmap' ? 'bg-gray-700' : 'bg-gray-800 hover:bg-gray-700'}`}
+                onClick={() => setBasemap('roadmap')}
+              >Road</button>
               <button
                 className={`text-xs px-2 py-1 rounded ${basemap === 'satellite' ? 'bg-gray-700' : 'bg-gray-800 hover:bg-gray-700'}`}
                 onClick={() => setBasemap('satellite')}
               >Satellite</button>
+              <button
+                className={`text-xs px-2 py-1 rounded ${basemap === 'hybrid' ? 'bg-gray-700' : 'bg-gray-800 hover:bg-gray-700'}`}
+                onClick={() => setBasemap('hybrid')}
+              >Hybrid</button>
+              <button
+                className={`text-xs px-2 py-1 rounded ${basemap === 'terrain' ? 'bg-gray-700' : 'bg-gray-800 hover:bg-gray-700'}`}
+                onClick={() => setBasemap('terrain')}
+              >Terrain</button>
               <div className="w-px h-4 bg-white/30 mx-2" />
               <label className="text-xs">Nodes</label>
               <button
@@ -1069,7 +1070,7 @@ export default function Home() {
           <div className="absolute left-4 top-4 z-10">
             <ResizableSidebarTrigger />
           </div>
-          <MapComponent
+          <GoogleMapComponent
             key={mapKey}
             polygons={polygons.map((p) => p.leafletPolygon)}
             hexagons={renderedHexagons}
