@@ -266,9 +266,9 @@ export default function GoogleMapComponent({
         const paths = hex.boundary.map(p => ({ lat: p.lat, lng: p.lng }));
         const hexagonOverlay = new google.maps.Polygon({
           paths: paths,
-          strokeColor: strokeColor,
-          strokeOpacity: 0.8,
-          strokeWeight: strokeWeight,
+          strokeColor: 'transparent', // Remove hexagon border lines
+          strokeOpacity: 0,
+          strokeWeight: 0,
           fillColor: fillColor,
           fillOpacity: fillOpacity,
         });

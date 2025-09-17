@@ -184,9 +184,9 @@ export default function MapComponent({
       }
 
       const hexPolygon = L.polygon(hex.boundary as LatLngExpression[], {
-        color: hexColor,
-        weight: weight,
-        opacity: 0.8,
+        color: 'transparent', // Remove hexagon border lines
+        weight: 0,
+        opacity: 0,
         fillColor: fillColor,
         fillOpacity: fillOpacity,
       }).addTo(group);
