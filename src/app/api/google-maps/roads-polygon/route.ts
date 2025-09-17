@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Client } from '@googlemaps/google-maps-services-js';
-import { cellToBoundary } from 'h3-js';
 import type { LatLng } from '@/app/osm-actions';
 
 const client = new Client({});
@@ -35,23 +34,57 @@ function isPointInPolygon(point: LatLng, polygon: LatLng[]): boolean {
   return inside;
 }
 
-function generateSamplePointsInHexagon(boundary: LatLng[], numPoints: number): LatLng[] {
+function isRoadSegmentInPolygon(segment: LatLng[], polygon: LatLng[]): boolean {
+  // Check if both endpoints are in the polygon
+  const startInPolygon = isPointInPolygon(segment[0], polygon);
+  const endInPolygon = isPointInPolygon(segment[1], polygon);
+  
+  // Road segment is valid if at least one endpoint is in the polygon
+  // This allows roads that cross the polygon boundary
+  return startInPolygon || endInPolygon;
+}
+
+function generateSamplePointsInPolygon(polygon: LatLng[], numPoints: number): LatLng[] {
   // Find bounding box
-  const minLat = Math.min(...boundary.map(p => p.lat));
-  const maxLat = Math.max(...boundary.map(p => p.lat));
-  const minLng = Math.min(...boundary.map(p => p.lng));
-  const maxLng = Math.max(...boundary.map(p => p.lng));
+  const minLat = Math.min(...polygon.map(p => p.lat));
+  const maxLat = Math.max(...polygon.map(p => p.lat));
+  const minLng = Math.min(...polygon.map(p => p.lng));
+  const maxLng = Math.max(...polygon.map(p => p.lng));
 
   const points: LatLng[] = [];
-  let attempts = 0;
-  const maxAttempts = numPoints * 10;
+  
+  // Calculate grid size based on polygon area
+  const latRange = maxLat - minLat;
+  const lngRange = maxLng - minLng;
+  const area = latRange * lngRange;
+  const gridSize = Math.sqrt(area / numPoints);
+  
+  // Generate grid-based points first (more systematic)
+  const latSteps = Math.ceil(latRange / gridSize);
+  const lngSteps = Math.ceil(lngRange / gridSize);
+  
+  for (let i = 0; i < latSteps; i++) {
+    for (let j = 0; j < lngSteps; j++) {
+      const lat = minLat + (i + 0.5) * gridSize;
+      const lng = minLng + (j + 0.5) * gridSize;
+      const point = { lat, lng };
 
+      if (isPointInPolygon(point, polygon)) {
+        points.push(point);
+      }
+    }
+  }
+  
+  // Add some random points to fill remaining slots
+  let attempts = 0;
+  const maxAttempts = (numPoints - points.length) * 5;
+  
   while (points.length < numPoints && attempts < maxAttempts) {
     const lat = minLat + Math.random() * (maxLat - minLat);
     const lng = minLng + Math.random() * (maxLng - minLng);
     const point = { lat, lng };
 
-    if (isPointInPolygon(point, boundary)) {
+    if (isPointInPolygon(point, polygon)) {
       points.push(point);
     }
     attempts++;
@@ -60,22 +93,22 @@ function generateSamplePointsInHexagon(boundary: LatLng[], numPoints: number): L
   return points;
 }
 
-async function getRoadsUsingGoogleRoadsAPI(boundary: LatLng[]): Promise<LatLng[][]> {
+async function getRoadsForPolygonUsingGoogleRoadsAPI(polygon: LatLng[]): Promise<LatLng[][]> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) {
     console.error('❌ Google Maps API key not found in environment variables');
     throw new Error('Google Maps API key not configured');
   }
   
-  console.log('✅ Using Google Roads API to get real road data');
+  console.log('✅ Using Google Roads API for polygon road data');
 
   try {
-    // Generate sample points within the hexagon boundary
-    const samplePoints = generateSamplePointsInHexagon(boundary, 50); // Reasonable number for hexagon
-    console.log(`📍 Generated ${samplePoints.length} sample points within hexagon`);
+    // Generate sample points within the polygon boundary with better distribution
+    const samplePoints = generateSamplePointsInPolygon(polygon, 100); // Reduced to avoid API limits
+    console.log(`📍 Generated ${samplePoints.length} sample points within polygon`);
 
     if (samplePoints.length === 0) {
-      console.warn('⚠️ No sample points generated within hexagon boundary');
+      console.warn('⚠️ No sample points generated within polygon boundary');
       return [];
     }
 
@@ -116,7 +149,7 @@ async function getRoadsUsingGoogleRoadsAPI(boundary: LatLng[]): Promise<LatLng[]
       return [];
     }
 
-    // Convert snapped points to road segments
+    // Convert snapped points to road segments with better filtering
     const roadSegments: LatLng[][] = [];
     const snappedPoints = allSnappedPoints;
 
@@ -159,11 +192,8 @@ async function getRoadsUsingGoogleRoadsAPI(boundary: LatLng[]): Promise<LatLng[]
             continue;
           }
 
-          // Only include segments that are within or intersect the hexagon boundary
-          const startInBoundary = isPointInPolygon(segment[0], boundary);
-          const endInBoundary = isPointInPolygon(segment[1], boundary);
-          
-          if (startInBoundary || endInBoundary) {
+          // Only include segments that are within or intersect the polygon boundary
+          if (isRoadSegmentInPolygon(segment, polygon)) {
             roadSegments.push(segment);
           }
         }
@@ -237,10 +267,7 @@ async function getRoadsUsingGoogleRoadsAPI(boundary: LatLng[]): Promise<LatLng[]
                 continue;
               }
 
-              const startInBoundary = isPointInPolygon(segment[0], boundary);
-              const endInBoundary = isPointInPolygon(segment[1], boundary);
-              
-              if (startInBoundary || endInBoundary) {
+              if (isRoadSegmentInPolygon(segment, polygon)) {
                 // Check if this segment is already included
                 const isDuplicate = roadSegments.some(existing => 
                   calculateDistance(existing[0], segment[0]) < 10 && 
@@ -259,31 +286,27 @@ async function getRoadsUsingGoogleRoadsAPI(boundary: LatLng[]): Promise<LatLng[]
       console.warn('⚠️ Nearest Roads API failed:', nearestRoadsError);
     }
 
-    console.log(`🛣️ Created ${roadSegments.length} road segments from Google Roads API`);
+    console.log(`🛣️ Created ${roadSegments.length} road segments from Google Roads API for polygon`);
     return roadSegments;
 
   } catch (error) {
-    console.error('❌ Error using Google Roads API:', error);
+    console.error('❌ Error using Google Roads API for polygon:', error);
     return [];
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const { hexIndex } = await req.json();
-    if (!hexIndex) {
-      return NextResponse.json({ error: 'hexIndex required' }, { status: 400 });
+    const { polygon } = await req.json();
+    if (!polygon || !Array.isArray(polygon) || polygon.length < 3) {
+      return NextResponse.json({ error: 'Valid polygon coordinates required' }, { status: 400 });
     }
 
-    console.log('=== Google Roads API Request ===');
-    console.log('Hex Index:', hexIndex);
+    console.log('=== Google Roads API (Polygon) Request ===');
+    console.log('Polygon points:', polygon.length);
 
-    // Convert hex index to boundary coordinates
-    const boundaryLngLat = cellToBoundary(hexIndex, true);
-    const boundary: LatLng[] = boundaryLngLat.map(([lng, lat]) => ({ lat, lng }));
-
-    // Get roads using Google Roads API
-    const roadSegments = await getRoadsUsingGoogleRoadsAPI(boundary);
+    // Get roads for the entire polygon using Google Roads API
+    const roadSegments = await getRoadsForPolygonUsingGoogleRoadsAPI(polygon);
 
     // Calculate total length
     const totalMeters = roadSegments.reduce((sum, segment) => {
@@ -293,14 +316,13 @@ export async function POST(req: NextRequest) {
     console.log(`📊 Response: ${roadSegments.length} segments, ${totalMeters.toFixed(0)}m total`);
 
     return NextResponse.json({
-      hexIndex,
       polylines: roadSegments,
       totalMeters,
       segmentCount: roadSegments.length,
     });
 
   } catch (error) {
-    console.error('❌ Error in Google Roads API:', error);
+    console.error('❌ Error in Google Roads API (polygon):', error);
     return NextResponse.json({
       error: 'Failed to fetch roads data',
       details: error instanceof Error ? error.message : 'Unknown error',

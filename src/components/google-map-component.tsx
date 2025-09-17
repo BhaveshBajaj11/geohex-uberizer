@@ -336,26 +336,39 @@ export default function GoogleMapComponent({
   useEffect(() => {
     if (!mapInstance.current || !isLoaded) return;
 
+    console.log('🛣️ GoogleMapComponent: Rendering roads, count:', roads.length);
+    console.log('🛣️ GoogleMapComponent: Road data:', roads);
+
     // Clear existing road polylines
     roadPolylines.current.forEach(polyline => polyline.setMap(null));
     roadPolylines.current = [];
 
     const map = mapInstance.current;
+    let renderedCount = 0;
 
-    roads.forEach((line) => {
+    roads.forEach((line, index) => {
       if (line && line.length > 1) {
         const path = line.map(p => ({ lat: p.lat, lng: p.lng }));
         const polyline = new google.maps.Polyline({
           path: path,
-          strokeColor: '#f97316',
-          strokeWeight: 3,
-          strokeOpacity: 0.9,
+          strokeColor: '#ff4500', // Brighter orange
+          strokeWeight: 5, // Thicker lines
+          strokeOpacity: 1.0, // Fully opaque
         });
         
         polyline.setMap(map);
         roadPolylines.current.push(polyline);
+        renderedCount++;
+        
+        if (index < 3) { // Log first 3 roads for debugging
+          console.log(`🛣️ Rendered road ${index + 1}:`, path);
+        }
+      } else {
+        console.warn(`🛣️ Skipped invalid road ${index + 1}:`, line);
       }
     });
+
+    console.log(`🛣️ GoogleMapComponent: Rendered ${renderedCount} road polylines`);
   }, [roads, isLoaded]);
 
   // Render length label for hovered hex

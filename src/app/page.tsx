@@ -223,51 +223,12 @@ export default function Home() {
           const lines = Object.values(res).flatMap(v => (v?.polylines || [])) as LatLngLiteral[][];
           setPolygonRoads(prev => [...prev, ...lines]);
           
-          // Fetch nodes and clusters
-          setNodesLoading(true);
-          console.log('Fetching nodes for polygon', idx, 'with hexes:', hexes.length);
-          const nodesRes = await getNodesForPolygon(perPolygonLeaflet[idx], hexes);
-          console.log('Nodes response:', nodesRes);
-          console.log('Raw response structure:', Object.keys(nodesRes));
+          // DISABLED: Fetch nodes and clusters (focusing only on roads)
+          console.log('🚫 Skipping node/cluster fetching - focusing on roads only');
           
-          // Update polygon nodes
-          setPolygonNodes(prev => {
-            const updated = { ...prev, ...nodesRes };
-            console.log('Updated polygon nodes keys:', Object.keys(updated));
-            
-            // Aggregate all clusters from ALL polygon nodes (not just this polygon)
-            const allClusters = Object.values(updated).flatMap(nodeResult => {
-              console.log('Processing hex result:', nodeResult.hexIndex, 'clusters:', nodeResult.clusters.length);
-              return nodeResult.clusters;
-            });
-            console.log('Total clusters found:', allClusters.length);
-            setAllClusters(allClusters);
-            
-            return updated;
-          });
-          
+          // Keep existing node data but don't fetch new data
           setNodesLoading(false);
-          
-          // Create node paths from existing nodes for Google Maps
-          setNodePathsLoading(true);
-          try {
-            console.log('Creating node paths from existing nodes for polygon', idx);
-            
-            // Use existing nodes to create paths
-            const allNodes = Object.values(nodesRes).flatMap(nodeResult => nodeResult.nodes);
-            console.log('Using', allNodes.length, 'nodes for path creation');
-            
-            // Import and use createNodePaths function
-            const { createNodePaths } = await import('./google-maps-actions');
-            const paths = createNodePaths(allNodes, 225, 270);
-            console.log('Created', paths.length, 'node paths');
-            setAllNodePaths(paths);
-            
-            setNodePathsLoading(false);
-          } catch (err) {
-            console.error('Error creating node paths:', err);
-            setNodePathsLoading(false);
-          }
+          setNodePathsLoading(false);
         } catch (err) {
           console.error('Error fetching polygon data:', err);
           setNodesLoading(false);
@@ -736,42 +697,13 @@ export default function Home() {
                 className={`text-xs px-2 py-1 rounded ${basemap === 'terrain' ? 'bg-gray-700' : 'bg-gray-800 hover:bg-gray-700'}`}
                 onClick={() => setBasemap('terrain')}
               >Terrain</button>
-              <div className="w-px h-4 bg-white/30 mx-2" />
+              {/* DISABLED: Node and Path controls - focusing on roads only */}
+              {/* <div className="w-px h-4 bg-white/30 mx-2" />
               <label className="text-xs">Nodes</label>
-              <button
-                className={`text-xs px-2 py-1 rounded ${
-                  nodesLoading ? 'bg-blue-600' : 
-                  showNodes ? 'bg-purple-600' : 
-                  Object.keys(polygonNodes).length === 0 ? 'bg-gray-600 opacity-50' : 'bg-gray-800 hover:bg-gray-700'
-                }`}
-                onClick={() => setShowNodes((n) => !n)}
-                disabled={Object.keys(polygonNodes).length === 0 && !nodesLoading}
-                title={
-                  nodesLoading ? 'Loading nodes...' :
-                  Object.keys(polygonNodes).length === 0 ? 'No node data - draw a polygon first' :
-                  `${Object.values(polygonNodes).reduce((sum, n) => sum + n.totalNodes, 0)} nodes, ${allClusters.length} clusters available`
-                }
-              >
-                {nodesLoading ? 'Loading...' : showNodes ? 'On' : 'Off'}
-              </button>
+              <button>...</button>
               <div className="w-px h-4 bg-white/30 mx-2" />
               <label className="text-xs">Paths</label>
-              <button
-                className={`text-xs px-2 py-1 rounded ${
-                  nodePathsLoading ? 'bg-blue-600' : 
-                  showNodePaths ? 'bg-green-600' : 
-                  Object.keys(polygonNodePaths).length === 0 ? 'bg-gray-600 opacity-50' : 'bg-gray-800 hover:bg-gray-700'
-                }`}
-                onClick={() => setShowNodePaths((p) => !p)}
-                disabled={Object.keys(polygonNodePaths).length === 0 && !nodePathsLoading}
-                title={
-                  nodePathsLoading ? 'Loading node paths...' :
-                  Object.keys(polygonNodePaths).length === 0 ? 'No node paths data - draw a polygon first' :
-                  `${allNodePaths.length} total paths, ${allNodePaths.filter(p => p.pathType === 'optimal').length} optimal (225-270m)`
-                }
-              >
-                {nodePathsLoading ? 'Loading...' : showNodePaths ? 'On' : 'Off'}
-              </button>
+              <button>...</button> */}
               <div className="w-px h-4 bg-white/30 mx-2" />
               <label className="text-xs">Measure</label>
               <button
@@ -787,17 +719,78 @@ export default function Home() {
             </div>
           </div>
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid w-full grid-cols-4 mx-2 mt-2">
+            <TabsList className="grid w-full grid-cols-2 mx-2 mt-2">
               <TabsTrigger value="input">Input</TabsTrigger>
               <TabsTrigger value="schedules" disabled={availableHexagons.length === 0}>
                 Schedule Routes ({Math.max(0, availableHexagons.length - scheduledHexagons.length)})
               </TabsTrigger>
-              <TabsTrigger value="nodes">Node Analysis</TabsTrigger>
-              <TabsTrigger value="paths">Node Paths</TabsTrigger>
+              {/* DISABLED: Node Analysis and Node Paths tabs - focusing on roads only */}
+              {/* <TabsTrigger value="nodes">Node Analysis</TabsTrigger>
+              <TabsTrigger value="paths">Node Paths</TabsTrigger> */}
             </TabsList>
             
             <TabsContent value="input" className="mt-4">
               <PolygonForm onSubmit={handlePolygonSubmit} />
+              
+              {/* Debug Road Data */}
+              {polygonRoads.length > 0 && (
+                <div className="bg-blue-50 border border-blue-200 rounded p-4 mb-4">
+                  <h4 className="font-medium text-blue-800 mb-2">🛣️ Road Data Debug (Real Google Maps Roads)</h4>
+                  <div className="text-sm space-y-1">
+                    <div>Total road polylines: <span className="font-medium">{polygonRoads.length}</span></div>
+                    <div>Total road segments: <span className="font-medium">{polygonRoads.reduce((sum, polyline) => sum + Math.max(0, polyline.length - 1), 0)}</span></div>
+                    <div>Sample road points: <span className="font-medium">{polygonRoads.slice(0, 3).map(polyline => `${polyline.length} points`).join(', ')}</span></div>
+                    <div className="text-xs text-green-600 mt-2">
+                      ✅ Using Google Maps Roads API with real road data
+                    </div>
+                    <div className="text-xs text-blue-600">
+                      📊 Shows actual roads from Google Maps - no synthetic/fake roads
+                    </div>
+                    <div className="flex gap-2 mt-2">
+                      <button 
+                        onClick={() => {
+                          console.log('🛣️ Polygon Roads Data:', polygonRoads);
+                          console.log('🛣️ Roads for Hex Data:', roadsForHex);
+                          alert(`Road data logged to console. Found ${polygonRoads.length} polylines.`);
+                        }}
+                        className="px-2 py-1 bg-blue-500 text-white rounded text-xs"
+                      >
+                        Log Road Data
+                      </button>
+                      <button 
+                        onClick={async () => {
+                          if (Array.from(selectedH3Indexes).length === 0) {
+                            alert('Please create a polygon first');
+                            return;
+                          }
+                          
+                          const testHex = Array.from(selectedH3Indexes)[0];
+                          console.log('🧪 Testing road fetch for hex:', testHex);
+                          
+                          try {
+                            const response = await fetch('/api/test-road-coverage', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ hexIndex: testHex })
+                            });
+                            
+                            const result = await response.json();
+                            console.log('🧪 Test result:', result);
+                            alert(`Test complete! Check console for details. Found ${result.roadTests?.simple?.segmentCount || 0} road segments.`);
+                          } catch (error) {
+                            console.error('🧪 Test failed:', error);
+                            alert('Test failed - check console');
+                          }
+                        }}
+                        className="px-2 py-1 bg-green-500 text-white rounded text-xs"
+                      >
+                        Test Road Fetch
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
               <PolygonList
                 polygons={polygons}
                 selectedH3Indexes={selectedH3Indexes}
@@ -1089,11 +1082,11 @@ export default function Home() {
             measurePoints={measurePoints}
             onMapClickForMeasure={(latlng) => setMeasurePoints((pts) => [...pts, latlng])}
             onMeasurePointDrag={(index, latlng) => setMeasurePoints((pts) => pts.map((p, i) => i === index ? latlng : p))}
-            clusters={allClusters}
-            showNodes={showNodes}
-            allNodes={Object.values(polygonNodes).flatMap(nodeResult => nodeResult.nodes)}
-            nodePaths={allNodePaths}
-            showNodePaths={showNodePaths}
+            clusters={[]}
+            showNodes={false}
+            allNodes={[]}
+            nodePaths={[]}
+            showNodePaths={false}
           />
         </main>
       </ResizableSidebarInset>

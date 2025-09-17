@@ -32,7 +32,7 @@ function isPointInPolygon(point: LatLng, polygon: LatLng[]): boolean {
   return inside;
 }
 
-function generateGridNodesInHexagon(boundary: LatLng[], spacing: number = 0.002): OSMNode[] {
+function generateGridNodesInHexagon(boundary: LatLng[], spacing: number = 0.001): OSMNode[] {
   // Find bounding box
   const minLat = Math.min(...boundary.map(p => p.lat));
   const maxLat = Math.max(...boundary.map(p => p.lat));
@@ -42,7 +42,7 @@ function generateGridNodesInHexagon(boundary: LatLng[], spacing: number = 0.002)
   const nodes: OSMNode[] = [];
   let nodeId = 1;
 
-  // Generate grid points within the hexagon
+  // Generate denser grid points within the hexagon for better village road coverage
   for (let lat = minLat; lat <= maxLat; lat += spacing) {
     for (let lng = minLng; lng <= maxLng; lng += spacing) {
       const point = { lat, lng };
@@ -57,14 +57,45 @@ function generateGridNodesInHexagon(boundary: LatLng[], spacing: number = 0.002)
     }
   }
 
-  console.log(`Generated ${nodes.length} grid nodes within hexagon`);
+  // Add additional random points for more realistic village road patterns
+  const additionalPoints = 20;
+  let attempts = 0;
+  const maxAttempts = additionalPoints * 10;
+
+  while (nodes.length < (nodeId - 1 + additionalPoints) && attempts < maxAttempts) {
+    const lat = minLat + Math.random() * (maxLat - minLat);
+    const lng = minLng + Math.random() * (maxLng - minLng);
+    const point = { lat, lng };
+    
+    if (isPointInPolygon(point, boundary)) {
+      // Check if point is not too close to existing nodes
+      const tooClose = nodes.some(existing => 
+        calculateDistance(existing, point) < 50 // At least 50m apart
+      );
+      
+      if (!tooClose) {
+        nodes.push({
+          id: `gm_simple_node_${nodeId++}`,
+          lat: point.lat,
+          lng: point.lng,
+          roadSegments: [],
+        });
+      }
+    }
+    attempts++;
+  }
+
+  console.log(`Generated ${nodes.length} grid nodes within hexagon (including ${additionalPoints} additional random points)`);
   return nodes;
 }
 
-function createRoadSegments(nodes: OSMNode[], maxSegmentDistance: number = 300): RoadSegment[] {
+function createRoadSegments(nodes: OSMNode[], maxSegmentDistance: number = 400): RoadSegment[] {
   const segments: RoadSegment[] = [];
   const processedPairs = new Set<string>();
 
+  // Create road segments using multiple strategies for better village road coverage
+  
+  // Strategy 1: Connect nearby nodes (increased distance for village roads)
   for (let i = 0; i < nodes.length; i++) {
     for (let j = i + 1; j < nodes.length; j++) {
       const node1 = nodes[i];
@@ -95,7 +126,148 @@ function createRoadSegments(nodes: OSMNode[], maxSegmentDistance: number = 300):
     }
   }
 
-  console.log(`Created ${segments.length} road segments from ${nodes.length} nodes`);
+  // Strategy 2: Create grid-based road patterns for rural areas
+  if (segments.length < 10) { // If we don't have many segments, create a grid
+    console.log('🔧 Creating grid-based road patterns for rural areas');
+    
+    // Group nodes by approximate grid positions
+    const gridSize = 0.002; // Grid cell size
+    const gridMap = new Map<string, OSMNode[]>();
+    
+    nodes.forEach(node => {
+      const gridKey = `${Math.floor(node.lat / gridSize)}_${Math.floor(node.lng / gridSize)}`;
+      if (!gridMap.has(gridKey)) {
+        gridMap.set(gridKey, []);
+      }
+      gridMap.get(gridKey)!.push(node);
+    });
+    
+    // Create horizontal and vertical road connections
+    const gridKeys = Array.from(gridMap.keys());
+    
+    // Horizontal connections (same latitude, different longitude)
+    const latGroups = new Map<number, OSMNode[]>();
+    nodes.forEach(node => {
+      const latKey = Math.floor(node.lat / gridSize) * gridSize;
+      if (!latGroups.has(latKey)) {
+        latGroups.set(latKey, []);
+      }
+      latGroups.get(latKey)!.push(node);
+    });
+    
+    latGroups.forEach(latNodes => {
+      if (latNodes.length >= 2) {
+        latNodes.sort((a, b) => a.lng - b.lng);
+        for (let i = 0; i < latNodes.length - 1; i++) {
+          const node1 = latNodes[i];
+          const node2 = latNodes[i + 1];
+          const distance = calculateDistance(node1, node2);
+          
+          if (distance <= maxSegmentDistance * 1.5) { // Allow longer segments for grid roads
+            const pairKey = `${Math.min(nodes.indexOf(node1), nodes.indexOf(node2))}_${Math.max(nodes.indexOf(node1), nodes.indexOf(node2))}`;
+            
+            if (!processedPairs.has(pairKey)) {
+              processedPairs.add(pairKey);
+              
+              const segment: RoadSegment = {
+                id: `gm_grid_horizontal_${segments.length + 1}`,
+                nodes: [node1, node2],
+                lengthMeters: distance,
+                wayId: `gm_grid_way_${segments.length + 1}`,
+              };
+              
+              segments.push(segment);
+              node1.roadSegments.push(segment.id);
+              node2.roadSegments.push(segment.id);
+            }
+          }
+        }
+      }
+    });
+    
+    // Vertical connections (same longitude, different latitude)
+    const lngGroups = new Map<number, OSMNode[]>();
+    nodes.forEach(node => {
+      const lngKey = Math.floor(node.lng / gridSize) * gridSize;
+      if (!lngGroups.has(lngKey)) {
+        lngGroups.set(lngKey, []);
+      }
+      lngGroups.get(lngKey)!.push(node);
+    });
+    
+    lngGroups.forEach(lngNodes => {
+      if (lngNodes.length >= 2) {
+        lngNodes.sort((a, b) => a.lat - b.lat);
+        for (let i = 0; i < lngNodes.length - 1; i++) {
+          const node1 = lngNodes[i];
+          const node2 = lngNodes[i + 1];
+          const distance = calculateDistance(node1, node2);
+          
+          if (distance <= maxSegmentDistance * 1.5) {
+            const pairKey = `${Math.min(nodes.indexOf(node1), nodes.indexOf(node2))}_${Math.max(nodes.indexOf(node1), nodes.indexOf(node2))}`;
+            
+            if (!processedPairs.has(pairKey)) {
+              processedPairs.add(pairKey);
+              
+              const segment: RoadSegment = {
+                id: `gm_grid_vertical_${segments.length + 1}`,
+                nodes: [node1, node2],
+                lengthMeters: distance,
+                wayId: `gm_grid_way_${segments.length + 1}`,
+              };
+              
+              segments.push(segment);
+              node1.roadSegments.push(segment.id);
+              node2.roadSegments.push(segment.id);
+            }
+          }
+        }
+      }
+    });
+  }
+
+  // Strategy 3: Connect isolated nodes to the nearest road network
+  const isolatedNodes = nodes.filter(node => node.roadSegments.length === 0);
+  if (isolatedNodes.length > 0) {
+    console.log(`🔧 Connecting ${isolatedNodes.length} isolated nodes to road network`);
+    
+    isolatedNodes.forEach(isolatedNode => {
+      let nearestNode: OSMNode | null = null;
+      let minDistance = Infinity;
+      
+      // Find the nearest connected node
+      nodes.forEach(node => {
+        if (node.id !== isolatedNode.id && node.roadSegments.length > 0) {
+          const distance = calculateDistance(isolatedNode, node);
+          if (distance < minDistance && distance < maxSegmentDistance * 2) {
+            minDistance = distance;
+            nearestNode = node;
+          }
+        }
+      });
+      
+      if (nearestNode) {
+        const pairKey = `${Math.min(nodes.indexOf(isolatedNode), nodes.indexOf(nearestNode))}_${Math.max(nodes.indexOf(isolatedNode), nodes.indexOf(nearestNode))}`;
+        
+        if (!processedPairs.has(pairKey)) {
+          processedPairs.add(pairKey);
+          
+          const segment: RoadSegment = {
+            id: `gm_connector_${segments.length + 1}`,
+            nodes: [isolatedNode, nearestNode],
+            lengthMeters: minDistance,
+            wayId: `gm_connector_way_${segments.length + 1}`,
+          };
+          
+          segments.push(segment);
+          isolatedNode.roadSegments.push(segment.id);
+          nearestNode.roadSegments.push(segment.id);
+        }
+      }
+    });
+  }
+
+  console.log(`Created ${segments.length} road segments from ${nodes.length} nodes (including grid patterns and connectors)`);
   return segments;
 }
 

@@ -75,7 +75,7 @@ export type NodeJoiningResult = {
 };
 
 export async function getRoadsForHexagon(hexIndex: string): Promise<RoadsInHexResult> {
-  // Try the simple roads API first (uses Places API instead of Roads API)
+  // Use the clean roads API that uses actual Google Roads API
   const res = await fetch('/api/google-maps/roads-simple', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -356,38 +356,71 @@ export function testDistanceCalculation(): void {
   console.log(`🎯 Test pathfinding result: ${testPaths.length} paths found`);
 }
 
-// For polygon operations, we can implement batching of individual hexagon requests
+// For polygon operations, use the Google Roads API for the entire polygon
 export async function getRoadsForPolygon(polygon: LatLng[], hexIndexes: string[]): Promise<Record<string, RoadsInHexResult>> {
-  const results: Record<string, RoadsInHexResult> = {};
+  console.log('🛣️ Fetching REAL roads for entire polygon using Google Roads API');
   
-  // Process hexagons in parallel with a reasonable concurrency limit
-  const concurrency = 5;
-  const chunks = [];
-  for (let i = 0; i < hexIndexes.length; i += concurrency) {
-    chunks.push(hexIndexes.slice(i, i + concurrency));
-  }
-  
-  for (const chunk of chunks) {
-    const promises = chunk.map(async (hexIndex) => {
-      try {
-        const result = await getRoadsForHexagon(hexIndex);
-        return { hexIndex, result };
-      } catch (error) {
-        console.error(`Failed to get roads for hex ${hexIndex}:`, error);
-        return { 
-          hexIndex, 
-          result: { hexIndex, polylines: [], totalMeters: 0, segmentCount: 0 } 
-        };
-      }
+  try {
+    // Use the Google Roads API for the entire polygon
+    const response = await fetch('/api/google-maps/roads-polygon', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ polygon })
     });
     
-    const chunkResults = await Promise.all(promises);
-    chunkResults.forEach(({ hexIndex, result }) => {
-      results[hexIndex] = result;
+    if (!response.ok) {
+      throw new Error(`Failed to fetch roads for polygon: ${response.status}`);
+    }
+    
+    const roadData = await response.json();
+    
+    // Distribute the road data to all hexagons in the polygon
+    const results: Record<string, RoadsInHexResult> = {};
+    hexIndexes.forEach(hexIndex => {
+      results[hexIndex] = {
+        hexIndex,
+        polylines: roadData.polylines || [],
+        totalMeters: roadData.totalMeters || 0,
+        segmentCount: roadData.segmentCount || 0
+      };
     });
+    
+    return results;
+    
+  } catch (error) {
+    console.error('Failed to fetch roads for polygon:', error);
+    
+    // Fallback: return empty results for all hexagons
+    const results: Record<string, RoadsInHexResult> = {};
+    hexIndexes.forEach(hexIndex => {
+      results[hexIndex] = { 
+        hexIndex, 
+        polylines: [], 
+        totalMeters: 0, 
+        segmentCount: 0 
+      };
+    });
+    return results;
   }
-  
-  return results;
+}
+
+// Helper function to check if a point is inside a polygon
+function isPointInPolygon(point: LatLng, polygon: LatLng[]): boolean {
+  const x = point.lng;
+  const y = point.lat;
+  let inside = false;
+
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].lng;
+    const yi = polygon[i].lat;
+    const xj = polygon[j].lng;
+    const yj = polygon[j].lat;
+
+    if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
+      inside = !inside;
+    }
+  }
+  return inside;
 }
 
 export async function getNodesForPolygon(polygon: LatLng[], hexIndexes: string[]): Promise<Record<string, NodesInHexResult>> {
