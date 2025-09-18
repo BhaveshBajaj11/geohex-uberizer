@@ -38,6 +38,7 @@ type GoogleMapComponentProps = {
   onHexagonHover?: (hexagonId: string | null) => void;
   clusterHexIds?: Set<string>; // Optional: show a cluster with a distinct style
   hoveredHexLengthMeters?: number; // Optional: show length label on hovered hex
+  hexagonRoadLengths?: Record<string, number>; // Optional: show road lengths for all hexagons
   // New props
   basemap?: 'roadmap' | 'satellite' | 'hybrid' | 'terrain';
   showHexagons?: boolean;
@@ -64,6 +65,8 @@ const getCenter = (boundary: LatLngLiteral[]): google.maps.LatLngLiteral => {
   return { lat: (minLat + maxLat) / 2, lng: (minLng + maxLng) / 2 };
 };
 
+// LengthLabel class will be defined inside useEffect where google is available
+
 export default function GoogleMapComponent({
   polygons, 
   hexagons, 
@@ -76,6 +79,7 @@ export default function GoogleMapComponent({
   onHexagonHover,
   clusterHexIds,
   hoveredHexLengthMeters,
+  hexagonRoadLengths,
   basemap = 'roadmap',
   showHexagons = true,
   measureMode = false,
@@ -100,6 +104,7 @@ export default function GoogleMapComponent({
   const pathPolylines = useRef<google.maps.Polyline[]>([]);
   const measureMarkers = useRef<google.maps.Marker[]>([]);
   const labelOverlays = useRef<google.maps.OverlayView[]>([]);
+  const hexagonRoadLengthLabels = useRef<google.maps.OverlayView[]>([]);
   
   const hasUserInteracted = useRef<boolean>(false);
 
@@ -121,6 +126,66 @@ export default function GoogleMapComponent({
         console.log('🔄 Loading Google Maps JavaScript API...');
         await loader.load();
         console.log('✅ Google Maps JavaScript API loaded successfully');
+        
+        // Define LengthLabel class now that google is available
+        if (typeof window !== 'undefined' && window.google) {
+          (window as any).LengthLabel = class LengthLabel extends google.maps.OverlayView {
+            position: google.maps.LatLng;
+            content: string;
+            div?: HTMLDivElement;
+
+            constructor(position: google.maps.LatLng, content: string) {
+              super();
+              this.position = position;
+              this.content = content;
+            }
+
+            onAdd() {
+              this.div = document.createElement('div');
+              this.div.style.cssText = `
+                position: absolute;
+                pointer-events: none;
+                backdrop-filter: blur(4px);
+                background: linear-gradient(90deg,rgba(17,17,17,0.8),rgba(17,17,17,0.6));
+                color: #fff;
+                padding: 4px 8px;
+                border-radius: 6px;
+                border: 1px solid rgba(255,255,255,0.18);
+                box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+                font-size: 12px;
+                display: flex;
+                gap: 6px;
+                align-items: center;
+                white-space: nowrap;
+              `;
+              
+              this.div.innerHTML = `
+                <span style="display:inline-block;width:8px;height:8px;background:#f97316;border-radius:9999px;"></span>
+                <span style="font-weight:600;letter-spacing:0.2px;">${this.content}</span>
+              `;
+
+              const panes = this.getPanes();
+              panes?.overlayMouseTarget.appendChild(this.div);
+            }
+
+            draw() {
+              if (this.div) {
+                const overlayProjection = this.getProjection();
+                const position = overlayProjection.fromLatLngToDivPixel(this.position);
+                if (position) {
+                  this.div.style.left = position.x + 'px';
+                  this.div.style.top = position.y + 'px';
+                }
+              }
+            }
+
+            onRemove() {
+              if (this.div) {
+                this.div.parentNode?.removeChild(this.div);
+              }
+            }
+          };
+        }
         
         if (mapRef.current && !mapInstance.current) {
           mapInstance.current = new google.maps.Map(mapRef.current, {
@@ -185,6 +250,7 @@ export default function GoogleMapComponent({
       overlay.setMap(null);
     });
     labelOverlays.current.forEach(overlay => overlay.setMap(null));
+    hexagonRoadLengthLabels.current.forEach(overlay => overlay.setMap(null));
     
     polygonOverlays.current = [];
     hexagonOverlays.current = [];
@@ -193,6 +259,7 @@ export default function GoogleMapComponent({
     pathPolylines.current = [];
     measureMarkers.current = [];
     labelOverlays.current = [];
+    hexagonRoadLengthLabels.current = [];
   };
 
   // Render polygons and hexagons
@@ -266,9 +333,9 @@ export default function GoogleMapComponent({
         const paths = hex.boundary.map(p => ({ lat: p.lat, lng: p.lng }));
         const hexagonOverlay = new google.maps.Polygon({
           paths: paths,
-          strokeColor: 'transparent', // Remove hexagon border lines
-          strokeOpacity: 0,
-          strokeWeight: 0,
+          strokeColor: strokeColor, // Show hexagon border lines
+          strokeOpacity: 0.8,
+          strokeWeight: strokeWeight,
           fillColor: fillColor,
           fillOpacity: fillOpacity,
         });
@@ -387,66 +454,9 @@ export default function GoogleMapComponent({
     const center = getCenter(hex.boundary);
     const km = (hoveredHexLengthMeters / 1000).toFixed(2);
 
-    // Create custom overlay for the label
-    class LengthLabel extends google.maps.OverlayView {
-      position: google.maps.LatLng;
-      content: string;
-      div: HTMLDivElement | null = null;
+    // Use the LengthLabel class defined at the top of the file
 
-      constructor(position: google.maps.LatLng, content: string) {
-        super();
-        this.position = position;
-        this.content = content;
-      }
-
-      onAdd() {
-        this.div = document.createElement('div');
-        this.div.style.cssText = `
-          position: absolute;
-          pointer-events: none;
-          backdrop-filter: blur(4px);
-          background: linear-gradient(90deg,rgba(17,17,17,0.8),rgba(17,17,17,0.6));
-          color: #fff;
-          padding: 4px 8px;
-          border-radius: 6px;
-          border: 1px solid rgba(255,255,255,0.18);
-          box-shadow: 0 4px 16px rgba(0,0,0,0.25);
-          font-size: 12px;
-          display: flex;
-          gap: 6px;
-          align-items: center;
-          white-space: nowrap;
-        `;
-        
-        this.div.innerHTML = `
-          <span style="display:inline-block;width:8px;height:8px;background:#f97316;border-radius:9999px;"></span>
-          <span style="font-weight:600;letter-spacing:0.2px;">${this.content}</span>
-        `;
-
-        const panes = this.getPanes();
-        panes?.overlayMouseTarget.appendChild(this.div);
-      }
-
-      draw() {
-        if (this.div) {
-          const overlayProjection = this.getProjection();
-          const sw = overlayProjection.fromLatLngToDivPixel(this.position);
-          if (sw) {
-            this.div.style.left = sw.x + 'px';
-            this.div.style.top = sw.y + 'px';
-          }
-        }
-      }
-
-      onRemove() {
-        if (this.div && this.div.parentNode) {
-          this.div.parentNode.removeChild(this.div);
-          this.div = null;
-        }
-      }
-    }
-
-    const labelOverlay = new LengthLabel(
+    const labelOverlay = new (window as any).LengthLabel(
       new google.maps.LatLng(center.lat, center.lng),
       `${km} km`
     );
@@ -454,6 +464,45 @@ export default function GoogleMapComponent({
     labelOverlay.setMap(mapInstance.current);
     labelOverlays.current.push(labelOverlay);
   }, [hoveredHexIndex, hoveredHexLengthMeters, hexagons, isLoaded]);
+
+  // Render road length labels for all hexagons
+  useEffect(() => {
+    if (!mapInstance.current || !isLoaded || !hexagonRoadLengths) return;
+
+    console.log('📏 Rendering road length labels:', hexagonRoadLengths);
+    console.log('📏 Hexagons count:', hexagons.length);
+
+    // Clear existing hexagon road length labels
+    hexagonRoadLengthLabels.current.forEach(label => label.setMap(null));
+    hexagonRoadLengthLabels.current = [];
+
+    const map = mapInstance.current;
+    let labelsRendered = 0;
+
+    hexagons.forEach((hex) => {
+      const roadLength = hexagonRoadLengths[hex.index];
+      console.log(`🔍 Checking hex ${hex.index}: roadLength = ${roadLength}`);
+      if (roadLength && roadLength > 0) {
+        const center = getCenter(hex.boundary);
+        const km = (roadLength / 1000).toFixed(1);
+        console.log(`✅ Rendering label for hex ${hex.index}: ${km} km`);
+        
+        const labelOverlay = new (window as any).LengthLabel(
+          new google.maps.LatLng(center.lat, center.lng),
+          `${km} km`
+        );
+        
+        labelOverlay.setMap(map);
+        hexagonRoadLengthLabels.current.push(labelOverlay);
+        labelsRendered++;
+        console.log(`📏 Rendered label for hex ${hex.index}: ${km} km`);
+      } else {
+        console.log(`❌ Skipping hex ${hex.index}: no road length data (roadLength=${roadLength})`);
+      }
+    });
+
+    console.log(`📏 Total road length labels rendered: ${labelsRendered}`);
+  }, [hexagonRoadLengths, hexagons, isLoaded]);
 
   // Render nodes and clusters
   useEffect(() => {

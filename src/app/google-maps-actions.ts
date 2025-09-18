@@ -1,5 +1,6 @@
 // Google Maps client wrapper around API routes.
 import * as turf from '@turf/turf';
+import { cellToBoundary } from 'h3-js';
 
 export type LatLng = { lat: number; lng: number };
 export type RoadsInHexResult = { hexIndex: string; polylines: LatLng[][]; totalMeters: number; segmentCount: number };
@@ -356,6 +357,46 @@ export function testDistanceCalculation(): void {
   console.log(`🎯 Test pathfinding result: ${testPaths.length} paths found`);
 }
 
+// Helper function to clip a road segment to a polygon boundary
+function clipSegmentToPolygon(segment: LatLng[], polygon: LatLng[]): LatLng[] | null {
+  if (segment.length < 2) return null;
+  
+  const start = segment[0];
+  const end = segment[1];
+  
+  // Check if both points are inside the polygon
+  const startInside = isPointInPolygon(start, polygon);
+  const endInside = isPointInPolygon(end, polygon);
+  
+  if (startInside && endInside) {
+    // Both points inside - return the full segment
+    return segment;
+  } else if (!startInside && !endInside) {
+    // Both points outside - check if segment intersects polygon
+    // Sample multiple points along the segment to check for intersection
+    const numSamples = 20; // Increased sampling for better accuracy
+    for (let i = 0; i <= numSamples; i++) {
+      const t = i / numSamples;
+      const samplePoint = {
+        lat: start.lat + t * (end.lat - start.lat),
+        lng: start.lng + t * (end.lng - start.lng)
+      };
+      
+      if (isPointInPolygon(samplePoint, polygon)) {
+        // Segment intersects polygon - return the full segment
+        return segment;
+      }
+    }
+    
+    // Segment doesn't intersect polygon
+    return null;
+  } else {
+    // One point inside, one outside - return the full segment
+    // This is a simplified approach; in production you'd want to clip to the boundary
+    return segment;
+  }
+}
+
 // For polygon operations, use the Google Roads API for the entire polygon
 export async function getRoadsForPolygon(polygon: LatLng[], hexIndexes: string[]): Promise<Record<string, RoadsInHexResult>> {
   console.log('🛣️ Fetching REAL roads for entire polygon using Google Roads API');
@@ -374,16 +415,47 @@ export async function getRoadsForPolygon(polygon: LatLng[], hexIndexes: string[]
     
     const roadData = await response.json();
     
-    // Distribute the road data to all hexagons in the polygon
+    // Clip roads to each individual hexagon
     const results: Record<string, RoadsInHexResult> = {};
-    hexIndexes.forEach(hexIndex => {
+    
+    console.log(`🔄 Clipping roads to ${hexIndexes.length} hexagons`);
+    
+    for (const hexIndex of hexIndexes) {
+      // Get hexagon boundary
+      const hexBoundary = cellToBoundary(hexIndex, true).map(([lng, lat]) => ({ lat, lng }));
+      
+      // Clip road segments to this hexagon
+      const clippedSegments: LatLng[][] = [];
+      let segmentsProcessed = 0;
+      let segmentsClipped = 0;
+      
+      for (const segment of roadData.polylines || []) {
+        if (segment.length >= 2) {
+          segmentsProcessed++;
+          const clippedSegment = clipSegmentToPolygon(segment, hexBoundary);
+          if (clippedSegment && clippedSegment.length >= 2) {
+            clippedSegments.push(clippedSegment);
+            segmentsClipped++;
+          }
+        }
+      }
+      
+      console.log(`📍 Hex ${hexIndex}: processed ${segmentsProcessed} segments, clipped ${segmentsClipped} segments`);
+      
+      // Calculate total length for this hexagon
+      const totalMeters = clippedSegments.reduce((sum, segment) => {
+        return sum + calculateDistance(segment[0], segment[1]);
+      }, 0);
+      
+      console.log(`📍 Hex ${hexIndex}: ${clippedSegments.length} segments, ${totalMeters.toFixed(0)}m`);
+      
       results[hexIndex] = {
         hexIndex,
-        polylines: roadData.polylines || [],
-        totalMeters: roadData.totalMeters || 0,
-        segmentCount: roadData.segmentCount || 0
+        polylines: clippedSegments,
+        totalMeters,
+        segmentCount: clippedSegments.length
       };
-    });
+    }
     
     return results;
     

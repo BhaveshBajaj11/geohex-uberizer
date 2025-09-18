@@ -39,6 +39,7 @@ type MapComponentProps = {
   onHexagonHover?: (hexagonId: string | null) => void;
   clusterHexIds?: Set<string>; // Optional: show a cluster with a distinct style
   hoveredHexLengthMeters?: number; // Optional: show length label on hovered hex
+  hexagonRoadLengths?: Record<string, number>; // Optional: show road lengths for all hexagons
   // New props
   basemap?: 'osm' | 'satellite';
   showHexagons?: boolean;
@@ -77,6 +78,7 @@ export default function MapComponent({
   onHexagonHover,
   clusterHexIds,
   hoveredHexLengthMeters,
+  hexagonRoadLengths,
   basemap = 'osm',
   showHexagons = true,
   measureMode = false,
@@ -94,6 +96,7 @@ export default function MapComponent({
   const featureGroup = useRef<L.FeatureGroup | null>(null);
   const roadsGroup = useRef<L.FeatureGroup | null>(null);
   const labelGroup = useRef<L.FeatureGroup | null>(null);
+  const hexagonRoadLengthGroup = useRef<L.FeatureGroup | null>(null);
   const measureGroup = useRef<L.FeatureGroup | null>(null);
   const nodesGroup = useRef<L.FeatureGroup | null>(null);
   const nodePathsGroup = useRef<L.FeatureGroup | null>(null);
@@ -114,6 +117,7 @@ export default function MapComponent({
       featureGroup.current = L.featureGroup().addTo(mapInstance.current);
       roadsGroup.current = L.featureGroup().addTo(mapInstance.current);
       labelGroup.current = L.featureGroup().addTo(mapInstance.current);
+      hexagonRoadLengthGroup.current = L.featureGroup().addTo(mapInstance.current);
       measureGroup.current = L.featureGroup().addTo(mapInstance.current);
       nodesGroup.current = L.featureGroup().addTo(mapInstance.current);
       nodePathsGroup.current = L.featureGroup().addTo(mapInstance.current);
@@ -288,6 +292,32 @@ export default function MapComponent({
     });
     L.marker(center, { icon: labelIcon, interactive: false }).addTo(lGroup);
   }, [hoveredHexIndex, hoveredHexLengthMeters, hexagons]);
+
+  // Render road length labels for all hexagons
+  useEffect(() => {
+    const hGroup = hexagonRoadLengthGroup.current;
+    if (!hGroup || !hexagonRoadLengths) return;
+    hGroup.clearLayers();
+
+    hexagons.forEach((hex) => {
+      const roadLength = hexagonRoadLengths[hex.index];
+      if (roadLength && roadLength > 0) {
+        const center = getCenter(hex.boundary);
+        const km = (roadLength / 1000).toFixed(1);
+        
+        const labelIcon = L.divIcon({
+          className: 'hex-road-length-label',
+          html: `<div style="pointer-events:none;backdrop-filter:blur(4px);background:linear-gradient(90deg,rgba(17,17,17,0.8),rgba(17,17,17,0.6));color:#fff;padding:3px 6px;border-radius:6px;border:1px solid rgba(255,255,255,0.18);box-shadow:0 4px 16px rgba(0,0,0,0.25);font-size:11px;display:flex;gap:4px;align-items:center;">
+            <span style="display:inline-block;width:6px;height:6px;background:#ff4500;border-radius:9999px;"></span>
+            <span style="font-weight:600;letter-spacing:0.2px;">${km} km</span>
+          </div>`,
+          iconSize: [1, 1],
+          iconAnchor: [0, 0],
+        });
+        L.marker(center, { icon: labelIcon, interactive: false }).addTo(hGroup);
+      }
+    });
+  }, [hexagonRoadLengths, hexagons]);
 
   // Basemap switching
   useEffect(() => {

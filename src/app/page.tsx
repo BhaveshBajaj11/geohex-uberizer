@@ -24,7 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { HexagonSchedule, ScheduledHexagon } from '@/types/scheduling';
 import { generateTimeSlots, getNextAvailableTimeSlot, generateScheduleId, getHexagonNumber, createCustomTimeSlot } from '@/lib/scheduling-utils';
 import { getHexagonsForTerminal } from './actions';
-import { getRoadsForHexagon, prefetchRoadsForHexagons, getRoadsForPolygon, getNodesForPolygon, getNodesForHexagon, testDistanceCalculation, type NodesInHexResult, type NodeCluster, type NodePath, type NodeJoiningResult } from './google-maps-actions';
+import { getRoadsForHexagon, prefetchRoadsForHexagons, getRoadsForPolygon, getNodesForPolygon, getNodesForHexagon, getNodePathsForPolygon, testDistanceCalculation, type NodesInHexResult, type NodeCluster, type NodePath, type NodeJoiningResult } from './osm-actions';
 
 const GoogleMapComponent = dynamic(() => import('@/components/google-map-component'), {
   ssr: false,
@@ -88,6 +88,14 @@ export default function Home() {
   const [allNodePaths, setAllNodePaths] = useState<NodePath[]>([]);
   const [showNodePaths, setShowNodePaths] = useState<boolean>(false);
   const [nodePathsLoading, setNodePathsLoading] = useState<boolean>(false);
+
+  // Debug: Monitor polygonRoads state
+  useEffect(() => {
+    console.log(`🛣️ polygonRoads state updated: ${polygonRoads.length} roads`);
+    if (polygonRoads.length > 0) {
+      console.log(`🛣️ Sample road:`, polygonRoads[0]);
+    }
+  }, [polygonRoads]);
 
   useEffect(() => {
     // Update map hexagons when selection changes
@@ -214,13 +222,22 @@ export default function Home() {
         if (hexes.length === 0) return;
         try {
           // Fetch roads
+          console.log(`🛣️ Fetching roads for polygon ${idx} with ${hexes.length} hexagons`);
           const res = await getRoadsForPolygon(perPolygonLeaflet[idx], hexes);
-          setRoadsForHex(prev => ({
-            ...prev,
-            ...Object.fromEntries(hexes.map(h => [h, { polylines: (res[h]?.polylines || []) as LatLngLiteral[][], totalMeters: res[h]?.totalMeters || 0, ts: Date.now() }]))
-          }));
+          console.log(`🛣️ Road fetch result:`, res);
+          setRoadsForHex(prev => {
+            const newData = Object.fromEntries(hexes.map(h => {
+              const roadData = { polylines: (res[h]?.polylines || []) as LatLngLiteral[][], totalMeters: res[h]?.totalMeters || 0, ts: Date.now() };
+              console.log(`📍 Hex ${h}: ${roadData.totalMeters}m roads, ${roadData.polylines.length} segments`);
+              return [h, roadData];
+            }));
+            console.log(`🛣️ Updated roadsForHex with ${Object.keys(newData).length} hexagons`);
+            return { ...prev, ...newData };
+          });
           // Aggregate all roads across hexes to display for the whole polygon
           const lines = Object.values(res).flatMap(v => (v?.polylines || [])) as LatLngLiteral[][];
+          console.log(`🛣️ Fetched ${lines.length} road lines for polygon ${idx}`);
+          console.log(`🛣️ Sample road data:`, lines.slice(0, 2));
           setPolygonRoads(prev => [...prev, ...lines]);
           
           // DISABLED: Fetch nodes and clusters (focusing only on roads)
@@ -237,7 +254,7 @@ export default function Home() {
 
       // Switch to satellite basemap and show roads by default when polygons are added
       setBasemap('satellite');
-      setShowHexagons(false);
+      setShowHexagons(true); // Show hexagons by default when polygons are created
       setMeasureMode(false);
       setMeasurePoints([]);
 
@@ -705,6 +722,13 @@ export default function Home() {
               <label className="text-xs">Paths</label>
               <button>...</button> */}
               <div className="w-px h-4 bg-white/30 mx-2" />
+              <label className="text-xs">Hexagons</label>
+              <button
+                className={`text-xs px-2 py-1 rounded ${showHexagons ? 'bg-blue-600' : 'bg-gray-800 hover:bg-gray-700'}`}
+                onClick={() => setShowHexagons((h) => !h)}
+                title={`${showHexagons ? 'Hide' : 'Show'} hexagon grid overlay (${Array.from(selectedH3Indexes).length} hexagons)`}
+              >{showHexagons ? 'On' : 'Off'}</button>
+              <div className="w-px h-4 bg-white/30 mx-2" />
               <label className="text-xs">Measure</label>
               <button
                 className={`text-xs px-2 py-1 rounded ${measureMode ? 'bg-emerald-600' : 'bg-gray-800 hover:bg-gray-700'}`}
@@ -719,14 +743,13 @@ export default function Home() {
             </div>
           </div>
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid w-full grid-cols-2 mx-2 mt-2">
+            <TabsList className="grid w-full grid-cols-4 mx-2 mt-2">
               <TabsTrigger value="input">Input</TabsTrigger>
               <TabsTrigger value="schedules" disabled={availableHexagons.length === 0}>
                 Schedule Routes ({Math.max(0, availableHexagons.length - scheduledHexagons.length)})
               </TabsTrigger>
-              {/* DISABLED: Node Analysis and Node Paths tabs - focusing on roads only */}
-              {/* <TabsTrigger value="nodes">Node Analysis</TabsTrigger>
-              <TabsTrigger value="paths">Node Paths</TabsTrigger> */}
+              <TabsTrigger value="nodes">Node Analysis</TabsTrigger>
+              <TabsTrigger value="paths">Node Paths</TabsTrigger>
             </TabsList>
             
             <TabsContent value="input" className="mt-4">
@@ -747,16 +770,49 @@ export default function Home() {
                       📊 Shows actual roads from Google Maps - no synthetic/fake roads
                     </div>
                     <div className="flex gap-2 mt-2">
-                      <button 
-                        onClick={() => {
-                          console.log('🛣️ Polygon Roads Data:', polygonRoads);
-                          console.log('🛣️ Roads for Hex Data:', roadsForHex);
-                          alert(`Road data logged to console. Found ${polygonRoads.length} polylines.`);
-                        }}
-                        className="px-2 py-1 bg-blue-500 text-white rounded text-xs"
-                      >
-                        Log Road Data
-                      </button>
+                        <button 
+                          onClick={() => {
+                            console.log('🛣️ Polygon Roads Data:', polygonRoads);
+                            console.log('🛣️ Roads for Hex Data:', roadsForHex);
+                            alert(`Road data logged to console. Found ${polygonRoads.length} polylines.`);
+                          }}
+                          className="px-2 py-1 bg-blue-500 text-white rounded text-xs"
+                        >
+                          Log Road Data
+                        </button>
+                        <button 
+                          onClick={async () => {
+                            console.log('🔄 Manually fetching road data for all polygons...');
+                            const perPolygonHexIndexes = polygons.map(p => p.allH3Indexes);
+                            const perPolygonLeaflet = polygons.map(p => p.leafletPolygon);
+                            
+                            for (let idx = 0; idx < perPolygonHexIndexes.length; idx++) {
+                              const hexes = perPolygonHexIndexes[idx];
+                              if (hexes.length === 0) continue;
+                              
+                              try {
+                                console.log(`🛣️ Manually fetching roads for polygon ${idx} with ${hexes.length} hexagons`);
+                                const res = await getRoadsForPolygon(perPolygonLeaflet[idx], hexes);
+                                console.log(`🛣️ Manual fetch result:`, res);
+                                
+                                setRoadsForHex(prev => {
+                                  const newData = Object.fromEntries(hexes.map(h => {
+                                    const roadData = { polylines: (res[h]?.polylines || []) as LatLngLiteral[][], totalMeters: res[h]?.totalMeters || 0, ts: Date.now() };
+                                    console.log(`📍 Manual - Hex ${h}: ${roadData.totalMeters}m roads, ${roadData.polylines.length} segments`);
+                                    return [h, roadData];
+                                  }));
+                                  return { ...prev, ...newData };
+                                });
+                              } catch (err) {
+                                console.error('Error in manual road fetch:', err);
+                              }
+                            }
+                            alert('Manual road data fetch completed. Check console for details.');
+                          }}
+                          className="px-2 py-1 bg-green-500 text-white rounded text-xs ml-2"
+                        >
+                          Manual Fetch Roads
+                        </button>
                       <button 
                         onClick={async () => {
                           if (Array.from(selectedH3Indexes).length === 0) {
@@ -1076,17 +1132,23 @@ export default function Home() {
             onHexagonHover={undefined}
             clusterHexIds={clusterHexIds}
             hoveredHexLengthMeters={undefined}
+            hexagonRoadLengths={Object.fromEntries(
+              Object.entries(roadsForHex).map(([hexId, data]) => {
+                console.log(`🔍 Hex ${hexId}: ${data.totalMeters}m road length`);
+                return [hexId, data.totalMeters];
+              })
+            )}
             basemap={basemap}
             showHexagons={showHexagons}
             measureMode={measureMode}
             measurePoints={measurePoints}
             onMapClickForMeasure={(latlng) => setMeasurePoints((pts) => [...pts, latlng])}
             onMeasurePointDrag={(index, latlng) => setMeasurePoints((pts) => pts.map((p, i) => i === index ? latlng : p))}
-            clusters={[]}
-            showNodes={false}
-            allNodes={[]}
-            nodePaths={[]}
-            showNodePaths={false}
+            clusters={allClusters}
+            showNodes={showNodes}
+            allNodes={Object.values(polygonNodes).flatMap(nodeResult => nodeResult.nodes)}
+            nodePaths={allNodePaths}
+            showNodePaths={showNodePaths}
           />
         </main>
       </ResizableSidebarInset>

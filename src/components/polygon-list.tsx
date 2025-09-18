@@ -61,17 +61,15 @@ export default function PolygonList({
                       Res {poly.resolution} &bull; {poly.allH3Indexes.length} Hexagons
                     </p>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
+                  <div
                     onClick={(e) => {
                       e.stopPropagation();
                       onRemovePolygon(poly.id);
                     }}
-                    className="ml-2 hover:bg-destructive/10 hover:text-destructive flex-shrink-0"
+                    className="ml-2 hover:bg-destructive/10 hover:text-destructive flex-shrink-0 p-2 rounded-md cursor-pointer transition-colors flex items-center justify-center"
                   >
                     <Trash2 className="h-4 w-4" />
-                  </Button>
+                  </div>
                 </div>
               </AccordionTrigger>
               <AccordionContent className="p-4 pt-0">
